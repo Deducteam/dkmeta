@@ -1,0 +1,15 @@
+OASISFormat: 0.4
+Name: dkmeta
+Version: 0.1
+Synopsis: A wrapper of Dedukti to rewrite Dedukti terms
+Authors: François Thiré <franth2@gmail.com>
+License: GPL
+
+BuildTools: ocamlbuild
+Plugins: META (0.4), DevFiles (0.4)
+
+Executable "dkmeta"
+  Path: src/
+  MainIs: main.ml
+  CompiledObject: best
+  BuildDepends: dedukti.kernel, dedukti.parser
