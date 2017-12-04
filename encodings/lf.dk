@@ -1,0 +1,13 @@
+#NAME LF.
+
+type : Type.
+
+def eta : type -> Type.
+
+ty : type.
+
+[] eta ty --> type.
+
+prod : A : type -> (eta A -> type) -> type.
+
+[A,f] eta (prod A f) --> a:eta A -> eta (f a).
