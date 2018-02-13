@@ -4,6 +4,8 @@
    - Use cmdliner
 *)
 
+let version = "0.1"
+
 type entry =
   | Declaration of Basic.loc * Basic.ident * Signature.staticity * Term.term
   | Definition of Basic.loc * Basic.ident * Term.term option * Term.term
@@ -66,8 +68,7 @@ struct
   let output_file () =
     !_output_file
 
-  let print_version =
-    Version.print_version
+  let print_version () = Format.printf "%s@." version
 
   let set_encoding s =
     _encoding := Some s
@@ -78,17 +79,17 @@ sig
   open Basic
   open Term
 
-  type t = entry
+  type t = term
   type ctx = loc * ident * term
   type db = int
 
   val md : mident
 
-  val signature : Signature.t
+  val signature : unit -> Signature.t
 
-  val encode_entry : entry -> t
+  val encode_term : term -> t
 
-  val decode_entry : t -> entry
+  val decode_term : t -> term
 
 end
 
@@ -98,18 +99,23 @@ struct
   open Basic
   open Term
 
-  type t = entry
+  type t = term
   type ctx = loc * ident * term
   type db = int
 
-  let md = mk_mident "LF"
+  let md = mk_mident "lf"
 
   let name_of str = mk_name md (mk_ident str)
 
   let const_of str = mk_Const dloc (name_of str)
 
-  let signature =
-    let sg = Signature.make md in Signature.import sg dloc md; sg
+  let signature () =
+    begin
+      match Env.import dloc md with
+      | OK () -> ()
+      | Err e -> Errors.fail_signature_error e
+    end;
+    let sg = Signature.make (mk_mident "fake") in Signature.import sg dloc md; sg
 
   let rec encode_term t =
     match t with
@@ -137,15 +143,16 @@ struct
     mk_App (const_of "prod") a' [mk_Lam dloc x (Some a') (encode_term b)]
 
   let encode_entry e =
+    let sg = signature () in
     match e with
     | Declaration(lc,id,st,te) ->
       Declaration(lc,id, st, encode_term te)
     | Definition(lc,id,mty,te) ->
-      let ty = match mty with None -> Typing.inference signature te | Some ty -> ty in
+      let ty = match mty with None -> Typing.inference sg te | Some ty -> ty in
       let mty' = mk_App (const_of "eta") (encode_term ty) [] in
       Definition(lc,id, Some mty',encode_term te)
     | Opaque(lc,id,mty,te) ->
-      let ty = match mty with None -> Typing.inference signature te | Some ty -> ty in
+      let ty = match mty with None -> Typing.inference sg te | Some ty -> ty in
       let mty' = mk_App (const_of "eta") (encode_term ty) [] in
       Opaque(lc,id, Some mty',encode_term te)
     | Cmd(cmd) -> failwith "commands are not handled right now"
@@ -206,6 +213,7 @@ struct
   open Basic
 
   let normalize_meta meta_file term =
+
     let filter name =
       match name with
       | Rule.Delta(cst) -> List.mem (md cst) (List.map mk_mident @@ module_files ())
@@ -222,7 +230,7 @@ struct
     | Err err -> failwith "normalization error"
 
   let normalize_encoding term =
-    failwith "todo"
+    LF.encode_term term
 
   let normalize term =
     match meta_file () with
@@ -230,15 +238,19 @@ struct
     | Some mf -> normalize_meta (mk_mident mf) term
 
 
-  let mk_prelude lc id =
-    Env.init id;
+  let prefix md = mk_mident ("meta_"^(string_of_mident md))
+  let mk_prelude lc md =
+    (* To avoid circular dependencies if the meta files depends on this module *)
+    let md' = prefix md in
+    Env.init md';
+    Format.printf "#NAME %a.@.@." pp_mident md;
     match meta_file () with
-    | None -> debug 0 "No meta file given"
+    | None -> debug 1 "No meta file given"
     | Some s ->
       let s = mk_mident s in
       match Env.import lc s with
       | OK () -> ()
-      | Err err -> failwith "cannot import the meta file, has it been checked?"
+      | Err err -> Format.printf "cannot import the meta file@."; Errors.fail_signature_error err
 
   let mk_declaration lc id st ty =
     let ty' = normalize ty in
