@@ -7,14 +7,5 @@
 *.cmi
 *.native
 
-# Oasis files
-setup.ml
-setup.data
-setup.log
-configure
-Makefile
-
 # OCamlbuild files
 _build/*
-_tags
-myocamlbuild.ml
