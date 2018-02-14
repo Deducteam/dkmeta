@@ -315,7 +315,8 @@ let args =
    "--module", Arg.String add_module_file, "Normalize against constants defined in an other module";
    "--non-linear", Arg.Unit use_non_linear, "Allows to have non-linear meta-rules";
    "--output", Arg.String set_output_file, "Output file";
-   ("-I"      , Arg.String Basic.add_path         , "Add a directory to load path");
+   "-I"      , Arg.String Basic.add_path         , "Add a directory to load path";
+   "-nl"     , Arg.Set    Rule.allow_non_linear  , "Allow non left-linear rewrite rules";
    "-version", Arg.Unit print_version, "print the version number"]
 
 let parse lexbuf =
