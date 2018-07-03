@@ -39,7 +39,7 @@ let _ =
   let options = Arg.align
     [ ( "-d"
       , Arg.String Debug.set_debug_mode
-      , "flags enables debugging for all given flags" )
+      , " flags enables debugging for all given flags" )
     ; ( "-v"
       , Arg.Unit (fun () -> Debug.set_debug_mode "w")
       , " Verbose mode (equivalent to -d 'w')" )
@@ -48,25 +48,25 @@ let _ =
       , " Quiet mode (equivalent to -d 'q'" )
     ; ("-m"
       , Arg.String add_meta_file
-      , "The file containing the meta rules. It has to be typed checked" )
+      , " The file containing the meta rules. It has to be typed checked" )
     ; ("--encode"
       , Arg.String set_encoding
-      , "Encoding the Dedukti file. Only LF encoding is supported right now")
+      , " Encoding the Dedukti file. Only LF encoding is supported right now")
+    ; ("--unsafe"
+      , Arg.Set safety
+      , " The meta file is not type checked")
     ; ("--switch-beta-off"
       , Arg.Unit switch_beta_off,
-      "switch off beta while normalizing terms")
-    ; ("--output"
-      , Arg.String set_output_file
-      , "Output file")
+      " switch off beta while normalizing terms")
     ; ( "-stdin"
       , Arg.String (fun n -> run_on_stdin := Some(n))
-      , "MOD Parses standard input using module name MOD" )
+      , " MOD Parses standard input using module name MOD" )
     ; ( "-version"
       , Arg.Unit (fun () -> Format.printf "Meta Dedukti %s@." Config.version)
       , " Print the version number" )
     ; ( "-I"
       , Arg.String Basic.add_path
-      , "DIR Add the directory DIR to the load path" )
+      , " DIR Add the directory DIR to the load path" )
     ; ( "-errors-in-snf"
       , Arg.Set Errors.errors_in_snf
       , " Normalize the types in error messages" )

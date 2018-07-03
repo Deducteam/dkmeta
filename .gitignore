@@ -9,3 +9,6 @@
 
 # OCamlbuild files
 _build/*
+
+# Dedukti files
+*.dko

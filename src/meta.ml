@@ -3,6 +3,10 @@ open Config
 open Encoding
 open Entry
 
+(* TODO:
+   - Cannot add meta rules on static symbols
+*)
+
 let normalize_meta term =
 
   let filter name =
@@ -36,9 +40,12 @@ let mk_entry md is_meta e =
   match e with
   | Decl(lc,id,st,ty) ->
     begin
-      match Env.declare lc id st ty with
-      | OK () -> ()
-      | Err e -> Errors.fail_env_error e
+      if not is_meta || not (Config.unsafe ()) then
+        match Env.declare lc id st ty with
+        | OK () -> ()
+        | Err e -> Errors.fail_env_error e
+      else
+        Signature.add_declaration (Env.get_signature ()) lc id st ty
     end;
     if is_meta then Debug.debug Debug.d_notice
         "[DKMETA] Declarations %a appears in meta files" Pp.print_ident id
@@ -53,10 +60,28 @@ let mk_entry md is_meta e =
       end
   | Def(lc,id,opaque,ty_opt,te) ->
     begin
-      let define = if opaque then Env.define_op else Env.define in
-      match define lc id te ty_opt with
-      | OK () -> ()
-      | Err e -> Errors.fail_env_error e
+      if not is_meta || not (Config.unsafe ()) then
+        let define = if opaque then Env.define_op else Env.define in
+        match define lc id te ty_opt with
+        | OK () -> ()
+        | Err e -> Errors.fail_env_error e
+      else
+        begin
+          let ty = match ty_opt with None -> Term.mk_Kind | Some ty -> ty in
+          let st = if opaque then Signature.Static else Signature.Definable in
+          Signature.add_declaration (Env.get_signature ()) lc id st ty;
+          let open Rule in
+          if not opaque then
+            let cst = mk_name md id in
+            let rule =
+              { name= Delta(cst) ;
+                ctx = [] ;
+                pat = Pattern(lc, cst, []);
+                rhs = te ;
+              }
+            in
+            Signature.add_rules (Env.get_signature ()) [rule]
+        end
     end;
     if is_meta then register_definition md id
     else
@@ -77,9 +102,14 @@ let mk_entry md is_meta e =
       end
   | Rules(rs) ->
     begin
-      match Env.add_rules rs with
-      | OK rs -> ()
-      | Err e -> Errors.fail_env_error e
+      if not is_meta || not (Config.unsafe ()) then
+          match Env.add_rules rs with
+          | OK rs -> ()
+          | Err e -> Errors.fail_env_error e
+      else
+        try
+          Signature.add_rules (Env.get_signature ()) rs
+        with Signature.SignatureError err -> Errors.fail_signature_error err
     end;
     if is_meta then register_rules rs
     else

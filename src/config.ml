@@ -4,9 +4,14 @@ let _meta_files : string list ref = ref []
 let _meta_rules : Rule.rule_name list ref = ref []
 let _meta_mds : Basic.mident list ref = ref []
 let _beta = ref true
+let _unsafe = ref true
 let _output_file : string option ref = ref None
 let _encoding : string option ref = ref None
 
+
+let safety = _unsafe
+
+let unsafe () = !_unsafe
 
 let add_meta_file s =
   _meta_files := s::!_meta_files
