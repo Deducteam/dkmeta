@@ -6,11 +6,30 @@
 
 open Basic
 
+
 let run_on_file is_meta file =
+  let import md =
+    match Env.import Basic.dloc md with
+    | OK _ -> ()
+    | Err err -> Errors.fail_signature_error err
+  in
+  let prelude md =
+    if not is_meta then
+      List.iter import (Config.meta_mds ())
+    else
+      Config.add_meta_md md
+  in
+  let postlude _ =
+  if is_meta then
+    Errors.success "File '%s' was successfully metaified." file
+  else
+    Errors.success "File '%s' was successfully checked." file;
+  in
   let input = open_in file in
   let md = Env.init file in
+  prelude md;
   Parser.handle_channel md (Meta.mk_entry md is_meta) input;
-  Errors.success "File '%s' was successfully checked." file;
+  postlude md;
   close_in input
 
 

@@ -24,7 +24,7 @@ let normalize_encoding term =
 
 let normalize term = normalize_meta term
 
-let register_definition md id = add_meta_rule (Delta(mk_name md id))
+let register_definition md id = add_meta_rule (Rule.Delta(mk_name md id))
 
 let register_rules (rs:Rule.untyped_rule list) =
   List.iter (fun (r:Rule.untyped_rule) -> add_meta_rule r.Rule.name) rs

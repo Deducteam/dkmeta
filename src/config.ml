@@ -2,6 +2,7 @@ let version = "0.1"
 
 let _meta_files : string list ref = ref []
 let _meta_rules : Rule.rule_name list ref = ref []
+let _meta_mds : Basic.mident list ref = ref []
 let _beta = ref true
 let _output_file : string option ref = ref None
 let _encoding : string option ref = ref None
@@ -9,6 +10,11 @@ let _encoding : string option ref = ref None
 
 let add_meta_file s =
   _meta_files := s::!_meta_files
+
+let add_meta_md md =
+  _meta_mds := md::!_meta_mds
+
+let meta_mds () = !_meta_mds
 
 let meta_files () = !_meta_files
 
