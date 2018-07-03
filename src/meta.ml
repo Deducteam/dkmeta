@@ -25,16 +25,38 @@ let normalize_meta term =
   in
   Env.unsafe_reduction ~red:red term
 
-
-let normalize_encoding term =
-  LF.encode_term term
-
-let normalize term = normalize_meta term
-
 let register_definition md id = add_meta_rule (Rule.Delta(mk_name md id))
 
 let register_rules (rs:Rule.untyped_rule list) =
   List.iter (fun (r:Rule.untyped_rule) -> add_meta_rule r.Rule.name) rs
+
+let encode t =
+  match !Config._encoding with
+  | None -> t
+  | Some enc ->
+    if enc = "lf" then
+      Encoding.LF.encode_term t
+    else
+      failwith "unknown encoding"
+
+let decode t =
+  match !Config._encoding with
+  | None -> t
+  | Some enc ->
+    if enc = "lf" then
+      Encoding.LF.decode_term t
+    else
+      assert false
+
+let normalize term =
+  Format.eprintf "before: %a@." Pp.print_term term;
+  let term' = encode term in
+  Format.eprintf "encoded: %a@." Pp.print_term term';
+  let term'' = normalize_meta term' in
+  Format.eprintf "normalized: %a@." Pp.print_term term'';
+  Format.eprintf "decoded: %a@." Pp.print_term (decode term'');
+  decode term''
+
 
 let mk_entry md is_meta e =
   match e with

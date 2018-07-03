@@ -20,10 +20,13 @@ let run_on_file is_meta file =
       Config.add_meta_md md
   in
   let postlude _ =
-  if is_meta then
-    Errors.success "File '%s' was successfully metaified." file
-  else
-    Errors.success "File '%s' was successfully checked." file;
+    if is_meta then
+      begin
+        Errors.success "File '%s' was successfully checked." file;
+        assert (Env.export ())
+      end
+    else
+      Errors.success "File '%s' was successfully metaified." file;
   in
   let input = open_in file in
   let md = Env.init file in
@@ -49,7 +52,7 @@ let _ =
     ; ("-m"
       , Arg.String add_meta_file
       , " The file containing the meta rules. It has to be typed checked" )
-    ; ("--encode"
+    ; ("--encoding"
       , Arg.String set_encoding
       , " Encoding the Dedukti file. Only LF encoding is supported right now")
     ; ("--unsafe"
@@ -94,40 +97,3 @@ let _ =
   | Parser.Parse_error(loc,msg) -> Format.eprintf "Parse error at (%a): %s@." pp_loc loc msg; exit 1
   | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
   | Exit                 -> exit 3
-
-
-(*
-module P = Parser.Make(Meta)
-
-let args =
-  let open Config in
-  ["--meta-file", Arg.String set_meta_file, "The file containing the meta rules. It has to be typed checked";
-   "--encode", Arg.String set_encoding, "Encoding the Dedukti file. Only LF encoding is supported right now";
-   "--switch-beta-off", Arg.Unit switch_beta_off, "switch off beta while normalizing terms";
-   "--module", Arg.String add_module_file, "Normalize against constants defined in an other module";
-   "--non-linear", Arg.Unit use_non_linear, "Allows to have non-linear meta-rules";
-   "--output", Arg.String set_output_file, "Output file";
-   "-I"      , Arg.String Basic.add_path         , "Add a directory to load path";
-   "-nl"     , Arg.Set    Rule.allow_non_linear  , "Allow non left-linear rewrite rules";
-   "-version", Arg.Unit print_version, "print the version number"]
-
-let parse lexbuf =
-  try
-    P.prelude Lexer.token lexbuf ;
-    while true do
-      P.line Lexer.token lexbuf
-    done;
-  with
-  | Lexer.EndOfFile -> ()
-  | P.Error       -> Errors.fail (Lexer.get_loc lexbuf)
-                         "Unexpected token '%s'." (Lexing.lexeme lexbuf)
-
-let run_on_file file =
-  let input = open_in file in
-  parse (Lexing.from_channel input);
-  close_in input
-
-let usage_msg () = "Usage: "^ Sys.argv.(0) ^" [options] files"
-
-let _ = Arg.parse args run_on_file (usage_msg ())
-        *)
