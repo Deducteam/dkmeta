@@ -6,7 +6,10 @@ open Entry
 let normalize_meta term =
 
   let filter name =
-    List.mem name (Config.meta_rules ())
+    let meta_rules = Config.meta_rules () in
+    match meta_rules with
+    | [] -> true (* no meta file given, then everything is meta *)
+    | _ -> List.mem name (Config.meta_rules ())
   in
   let red = let open Reduction in
     {
