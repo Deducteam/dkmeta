@@ -1,21 +1,16 @@
 let version = "0.1"
 
-let _meta_file : string option ref = ref None
-let _module_files : string list ref = ref []
+let _meta_files : string list ref = ref []
+let _meta_rules : Rule.rule_name list ref = ref []
 let _beta = ref true
 let _output_file : string option ref = ref None
 let _encoding : string option ref = ref None
 
 
-let set_meta_file s =
-  _meta_file := Some s
+let add_meta_file s =
+  _meta_files := s::!_meta_files
 
-let meta_file () = !_meta_file
-
-let add_module_file s =
-  _module_files := s::!_module_files
-
-let module_files () = !_module_files
+let meta_files () = !_meta_files
 
 let switch_beta_off () =
   _beta := false
@@ -35,3 +30,7 @@ let print_version () = Format.printf "%s@." version
 
 let set_encoding s =
   _encoding := Some s
+
+let add_meta_rule n = _meta_rules := n::!_meta_rules
+
+let meta_rules () = !_meta_rules

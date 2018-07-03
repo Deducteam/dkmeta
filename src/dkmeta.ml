@@ -4,108 +4,79 @@
    - Use cmdliner
 *)
 
+open Basic
+
+let run_on_file is_meta file =
+  let input = open_in file in
+  let md = Env.init file in
+  Parser.handle_channel md (Meta.mk_entry md is_meta) input;
+  Errors.success "File '%s' was successfully checked." file;
+  close_in input
 
 
-
-module Meta =
-struct
-  open Config
-  open Encoding
-  open Basic
-
-  let normalize_meta meta_file term =
-
-    let filter name =
-      match name with
-      | Rule.Delta(cst) -> List.mem (md cst) (List.map mk_mident @@ module_files ())
-      | Rule.Gamma(_,cst) -> mident_eq (md cst) meta_file
-    in
-    let red = let open Reduction in
-      {
-        beta = Config.beta ();
-        select = Some filter;
-        strategy = Snf;
-        nb_steps = None;
-      }
-    in
-    match Env.reduction ~red:red term with
-    | OK t -> t
-    | Err err -> failwith "normalization error"
-
-  let normalize_encoding term =
-    LF.encode_term term
-
-  let normalize term =
-    match meta_file () with
-    | None -> normalize_encoding term
-    | Some mf -> normalize_meta (mk_mident mf) term
-
-
-  let prefix md = "meta_"^(string_of_mident md)
-  let mk_prelude lc file =
-    (* To avoid circular dependencies if the meta files depends on this module *)
-    let file' = prefix file in
-    ignore(Env.init file');
-    match meta_file () with
-    | None -> Debug.debug Debug.d_notice "No meta file given"
-    | Some s ->
-      let s = mk_mident s in
-      match Env.import lc s with
-      | OK () -> ()
-      | Err err -> Format.printf "cannot import the meta file@."; Errors.fail_signature_error err
-
-  let mk_declaration lc id st ty =
-    let ty' = normalize ty in
-    let kw = match st with
-    | Signature.Static -> ""
-    | Signature.Definable -> "def "
-    in
-    Format.printf "@[<2>%s%a :@ %a.@]@.@." kw pp_ident id Pp.print_term ty'
-
-  let mk_definition lc id ty_opt te =
-    let ty_opt' =
-      match ty_opt with
-      | None -> None
-      | Some t -> Some (normalize t)
-    in
-    let te' = normalize te in
-    match ty_opt' with
-    | None ->
-      Format.printf "@[<hv2>def %a :=@ %a.@]@.@." pp_ident id Pp.print_term te'
-    | Some ty ->
-      Format.printf "@[<hv2>def %a :@ %a@ :=@ %a.@]@.@."
-        pp_ident id Pp.print_term ty Pp.print_term te'
+let _ =
+  let open Config in
+  let run_on_stdin = ref None  in
+  let options = Arg.align
+    [ ( "-d"
+      , Arg.String Debug.set_debug_mode
+      , "flags enables debugging for all given flags" )
+    ; ( "-v"
+      , Arg.Unit (fun () -> Debug.set_debug_mode "w")
+      , " Verbose mode (equivalent to -d 'w')" )
+    ; ( "-q"
+      , Arg.Unit (fun () -> Debug.set_debug_mode "q")
+      , " Quiet mode (equivalent to -d 'q'" )
+    ; ("-m"
+      , Arg.String add_meta_file
+      , "The file containing the meta rules. It has to be typed checked" )
+    ; ("--encode"
+      , Arg.String set_encoding
+      , "Encoding the Dedukti file. Only LF encoding is supported right now")
+    ; ("--switch-beta-off"
+      , Arg.Unit switch_beta_off,
+      "switch off beta while normalizing terms")
+    ; ("--output"
+      , Arg.String set_output_file
+      , "Output file")
+    ; ( "-stdin"
+      , Arg.String (fun n -> run_on_stdin := Some(n))
+      , "MOD Parses standard input using module name MOD" )
+    ; ( "-version"
+      , Arg.Unit (fun () -> Format.printf "Meta Dedukti %s@." Config.version)
+      , " Print the version number" )
+    ; ( "-I"
+      , Arg.String Basic.add_path
+      , "DIR Add the directory DIR to the load path" )
+    ; ( "-errors-in-snf"
+      , Arg.Set Errors.errors_in_snf
+      , " Normalize the types in error messages" )
+    ; ( "-nl"
+      , Arg.Set Rule.allow_non_linear
+      , " Allow non left-linear rewriting rules" )]
+  in
+  let usage = "Usage: " ^ Sys.argv.(0) ^ " [OPTION]... [FILE]...\n" in
+  let usage = usage ^ "Available options:" in
+  let files =
+    let files = ref [] in
+    Arg.parse options (fun f -> files := f :: !files) usage;
+    List.rev !files
+  in
+  try
+    List.iter (run_on_file true) (Config.meta_files ());
+    List.iter (run_on_file false) files;
+    match !run_on_stdin with
+    | None   -> ()
+    | Some m ->
+      let md = Env.init m in
+      Parser.handle_channel md (Meta.mk_entry md false) stdin;
+      Errors.success "Standard input was successfully checked.\n"
+  with
+  | Parser.Parse_error(loc,msg) -> Format.eprintf "Parse error at (%a): %s@." pp_loc loc msg; exit 1
+  | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
+  | Exit                 -> exit 3
 
 
-  let mk_opaque lc id ty_opt te =
-    let ty_opt' =
-      match ty_opt with
-      | None -> None
-      | Some t -> Some (normalize t)
-    in
-    let te' = normalize te in
-    match ty_opt' with
-    | None ->
-      Format.printf "@[<hv2>thm %a :=@ %a.@]@.@." pp_ident id Pp.print_term te'
-    | Some ty ->
-      Format.printf "@[<hv2>thm %a :@ %a@ :=@ %a.@]@.@."
-        pp_ident id Pp.print_term ty Pp.print_term te'
-
-  let mk_rules lst =
-    let normalize_rule (r : Rule.untyped_rule) : Rule.untyped_rule =
-      let open Rule in
-      {r with rhs = normalize r.rhs}
-    in
-    let lst' = List.map normalize_rule lst in
-    let print_rule r =
-      Format.printf "@[%a@].@.@." Pp.print_untyped_rule r
-    in
-    List.iter print_rule lst'
-
-
-  let mk_command lc = failwith "command are not supported right now"
-  let mk_ending () = ()
-end
 (*
 module P = Parser.Make(Meta)
 

@@ -6,7 +6,7 @@ open Entry
 let normalize_meta term =
 
   let filter name =
-    List.mem name !Config.meta_rules
+    List.mem name (Config.meta_rules ())
   in
   let red = let open Reduction in
     {
@@ -24,6 +24,10 @@ let normalize_encoding term =
 
 let normalize term = normalize_meta term
 
+let register_definition md id = add_meta_rule (Delta(mk_name md id))
+
+let register_rules (rs:Rule.untyped_rule list) =
+  List.iter (fun (r:Rule.untyped_rule) -> add_meta_rule r.Rule.name) rs
 
 let mk_entry md is_meta e =
   match e with
