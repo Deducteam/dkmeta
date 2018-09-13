@@ -2,4 +2,4 @@ S src/
 
 B _build/src/
 
-PKG dedukti.kernel dedukti.parser
+PKG dedukti dedukti.kernel dedukti.parser dedukti.api

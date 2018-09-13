@@ -1,53 +1,82 @@
-(* TODO:
-   - split the project in several modules
-   - Make an API so that it can be use as a library
-   - Use cmdliner
-*)
-
 open Basic
 
+let meta_files : string list ref = ref []
+let add_meta_file s =
+  meta_files := s::!meta_files
 
-let run_on_file is_meta file =
-  let import md =
-    match Env.import Basic.dloc md with
-    | OK _ -> ()
-    | Err err -> Errors.fail_signature_error err
-  in
-  let prelude md =
-    if not is_meta then
-      List.iter import (Config.meta_mds ())
+let meta_mds : Basic.mident list ref = ref []
+let add_meta_md md =
+  meta_mds := md::!meta_mds
+
+let mk_entry md safe =
+  let open Entry in
+  let open Rule in
+  let sg = Env.get_signature () in
+  function
+  | Decl(lc,id,st,ty) ->
+    if safe then
+      Env.declare lc id st ty
     else
-      Config.add_meta_md md
-  in
-  let postlude _ =
-    if is_meta then
-      begin
-        Errors.success "File '%s' was successfully checked." file;
-        assert (Env.export ())
-      end
+      Signature.add_declaration sg lc id st ty
+  | Def(lc,id,opaque,ty_opt,te) ->
+    Config.add_meta_rule (Delta(mk_name md id));
+    if safe then
+      Env.define lc id opaque te ty_opt
     else
-      Errors.success "File '%s' was successfully metaified." file;
-  in
+      let ty = match ty_opt with None -> assert false | Some ty -> ty in
+      Signature.add_declaration sg lc id Signature.Definable ty;
+      let cst = mk_name md id in
+      let rule = {name = Delta(cst); ctx= []; pat = Pattern(lc, cst, []); rhs = te} in
+      let rule = Rule.to_rule_infos rule in
+      Signature.add_rules sg [rule]
+  | Rules(lc,rs) ->
+    ignore(Env.add_rules rs);
+    List.iter (fun (r:untyped_rule) -> Config.add_meta_rule r.name) rs
+  | _ -> ()
+
+let run_on_meta_file safe file =
   let input = open_in file in
   let md = Env.init file in
-  prelude md;
-  Parser.handle_channel md (Meta.mk_entry md is_meta) input;
-  postlude md;
+  add_meta_md md;
+  Parser.handle_channel md (mk_entry md safe) input;
+  Errors.success "File '%s' was successfully checked." file;
+  Env.export ();
   close_in input
 
+let run_on_file file =
+  let import md = Env.import Basic.dloc md in
+  let input = open_in file in
+  let md = Env.init file in
+  List.iter import !meta_mds;
+  Parser.handle_channel md (Meta.mk_entry md) input;
+  Errors.success "File '%s' was successfully metaified." file;
+  close_in input
+
+let set_debug_mode opts =
+  try  Env.set_debug_mode opts
+  with Env.DebugFlagNotRecognized c ->
+    if c = 'a' then
+      Debug.enable_flag Meta.D_meta
+    else
+      raise (Env.DebugFlagNotRecognized c)
 
 let _ =
-  let open Config in
   let run_on_stdin = ref None  in
+  let safety = ref false in
+  let switch_beta_off () = Config.(config.beta <- false) in
+  let switch_everything () = Config.(config.everything <- true) in
+  let set_encoding enc =
+    if enc = "lf" then
+      Config.(config.encoding <- Some (module Encoding.LFP))
+    else
+      Errors.fail_exit (-1) dloc "Unknown encoding '%s'" enc
+  in
   let options = Arg.align
     [ ( "-d"
-      , Arg.String Debug.set_debug_mode
+      , Arg.String set_debug_mode
       , " flags enables debugging for all given flags" )
-    ; ( "-v"
-      , Arg.Unit (fun () -> Debug.set_debug_mode "w")
-      , " Verbose mode (equivalent to -d 'w')" )
     ; ( "-q"
-      , Arg.Unit (fun () -> Debug.set_debug_mode "q")
+      , Arg.Unit (fun () -> Env.set_debug_mode "q")
       , " Quiet mode (equivalent to -d 'q'" )
     ; ("-m"
       , Arg.String add_meta_file
@@ -57,7 +86,10 @@ let _ =
       , " Encoding the Dedukti file. Only LF encoding is supported right now")
     ; ("--unsafe"
       , Arg.Set safety
-      , " The meta file is not type checked")
+      , " Meta files are not type checked")
+    ; ("--everything"
+      , Arg.Unit switch_everything
+      , " Every rule are considered as meta. Subsume option -m")
     ; ("--switch-beta-off"
       , Arg.Unit switch_beta_off,
       " switch off beta while normalizing terms")
@@ -72,10 +104,7 @@ let _ =
       , " DIR Add the directory DIR to the load path" )
     ; ( "-errors-in-snf"
       , Arg.Set Errors.errors_in_snf
-      , " Normalize the types in error messages" )
-    ; ( "-nl"
-      , Arg.Set Rule.allow_non_linear
-      , " Allow non left-linear rewriting rules" )]
+      , " Normalize the types in error messages" )]
   in
   let usage = "Usage: " ^ Sys.argv.(0) ^ " [OPTION]... [FILE]...\n" in
   let usage = usage ^ "Available options:" in
@@ -85,15 +114,15 @@ let _ =
     List.rev !files
   in
   try
-    List.iter (run_on_file true) (Config.meta_files ());
-    List.iter (run_on_file false) files;
+    List.iter (run_on_meta_file !safety) !meta_files;
+    List.iter run_on_file files;
     match !run_on_stdin with
     | None   -> ()
     | Some m ->
       let md = Env.init m in
-      Parser.handle_channel md (Meta.mk_entry md false) stdin;
+      Parser.handle_channel md (Meta.mk_entry md) stdin;
       Errors.success "Standard input was successfully checked.\n"
   with
-  | Parser.Parse_error(loc,msg) -> Format.eprintf "Parse error at (%a): %s@." pp_loc loc msg; exit 1
+  | Env.EnvError(l,e) -> Errors.fail_env_error l e
   | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
   | Exit                 -> exit 3

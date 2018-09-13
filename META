@@ -1,0 +1,6 @@
+name = "dkmeta"
+version = "0.1"
+description = "A wrapper around the rewrite engine of Dedukti"
+requires = "dedukti"
+archive(byte) = "dkmeta.cma"
+archive(native) = "dkmeta.cmxa"

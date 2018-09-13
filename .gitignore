@@ -1,6 +1,6 @@
 # Emacs files
 *~
-
+\#*
 # ML files
 *.mli
 *.cmo
