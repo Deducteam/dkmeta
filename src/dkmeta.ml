@@ -30,12 +30,26 @@ let mk_entry md safe =
       let rule = Rule.to_rule_infos rule in
       Signature.add_rules sg [rule]
   | Rules(lc,rs) ->
-    ignore(Env.add_rules rs);
+    begin
+      if safe then
+        ignore(Env.add_rules rs)
+      else
+        let ri = List.map Rule.to_rule_infos rs in
+        Signature.add_rules sg ri
+    end;
     List.iter (fun (r:untyped_rule) -> Config.add_meta_rule r.name) rs
   | _ -> ()
 
 let run_on_meta_file safe file =
+  let open Config in
   let input = open_in file in
+  begin
+  match config.encoding with
+  | None -> ()
+  | Some (module E) ->
+    ignore(Env.init  "lf");
+    List.iter (mk_entry E.md safe) (E.entries ())
+  end;
   let md = Env.init file in
   add_meta_md md;
   Parser.handle_channel md (mk_entry md safe) input;
@@ -62,12 +76,17 @@ let set_debug_mode opts =
 
 let _ =
   let run_on_stdin = ref None  in
-  let safety = ref false in
+  let unsafe = ref false in
   let switch_beta_off () = Config.(config.beta <- false) in
   let switch_everything () = Config.(config.everything <- true) in
   let set_encoding enc =
-    if enc = "lf" then
+    if enc = "lfp" then
       Config.(config.encoding <- Some (module Encoding.LFP))
+    else if enc = "lf" then
+      begin
+        Config.(config.encoding <- Some (module Encoding.LF));
+        unsafe := true
+      end
     else
       Errors.fail_exit (-1) dloc "Unknown encoding '%s'" enc
   in
@@ -85,7 +104,7 @@ let _ =
       , Arg.String set_encoding
       , " Encoding the Dedukti file. Only LF encoding is supported right now")
     ; ("--unsafe"
-      , Arg.Set safety
+      , Arg.Set unsafe
       , " Meta files are not type checked")
     ; ("--everything"
       , Arg.Unit switch_everything
@@ -114,7 +133,7 @@ let _ =
     List.rev !files
   in
   try
-    List.iter (run_on_meta_file !safety) !meta_files;
+    List.iter (run_on_meta_file (not !unsafe)) !meta_files;
     List.iter run_on_file files;
     match !run_on_stdin with
     | None   -> ()
