@@ -1,18 +1,18 @@
 module type T =
 sig
   open Basic
-  open Term
-
-  type t = term
 
   val md : mident
 
   val entries : unit -> Entry.entry list
 
-  val encode_term : ?ctx:typed_context -> term -> t
+  val signature : Signature.t
 
-  val decode_term : t -> term
+  val encode_term : ?ctx:Term.typed_context -> Term.term -> Term.term
 
+  val encode_pattern : ?ctx:Term.typed_context -> Rule.pattern -> Rule.pattern
+
+  val decode_term : Term.term -> Term.term
 end
 
 module LF:T =
@@ -21,13 +21,21 @@ struct
   open Basic
   open Term
 
-  type t = term
-
   let md = mk_mident "lf"
 
   let entries () =
-    let mk_decl id = Entry.Decl(dloc,mk_ident id, Signature.Definable, mk_Type dloc) in
+    let mk_decl id =
+      Entry.Decl(dloc,mk_ident id, Signature.Definable,mk_Type dloc)
+    in
     List.map mk_decl ["ty"; "var";"sym";"lam";"app";"prod"]
+
+  let signature =
+    let sg = Signature.make "lf" in
+    let mk_decl id =
+      Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
+    in
+    List.iter mk_decl ["ty"; "var";"sym";"lam";"app";"prod"];
+    sg
 
   let name_of str = mk_name md (mk_ident str)
 
@@ -60,6 +68,19 @@ struct
 
   and encode_Pi lc x a b =
     mk_App (const_of "prod") (mk_Lam dloc x (Some (encode_term a)) (encode_term b)) []
+
+
+  (* Using typed context here does not make sense *)
+  let rec encode_pattern ?(ctx=[]) pattern : Rule.pattern =
+    let open Rule in
+    match pattern with
+    | Var(lc, id, n, ps) -> Var(lc,id,n, List.map (encode_pattern ~ctx) ps)
+    | Brackets(term) -> Brackets(encode_term ~ctx term)
+    | Lambda(lc, id, p) -> Pattern(lc,(name_of "lam"), [(Lambda(lc,id, encode_pattern ~ctx p))])
+    | Pattern(lc,n,[]) ->
+      Pattern(lc,name_of "sym", [Pattern(lc,n,[])])
+    | Pattern(lc,n, ps) ->
+      Pattern(lc, name_of "app", (Pattern(lc,name_of "sym",[Pattern(lc,n,[])]))::(List.map (encode_pattern ~ctx) ps))
 
   let rec decode_term t =
     match t with
@@ -111,11 +132,13 @@ struct
 
   type t = term
 
-  let md = mk_mident "lf"
+  let md = mk_mident "lfp"
 
   let name_of str = mk_name md (mk_ident str)
 
   let const_of str = mk_Const dloc (name_of str)
+
+  let signature = Signature.make "lfp"
 
   let entries () =
     let file = "encodings/lf.dk" in
@@ -124,6 +147,8 @@ struct
     Parser.parse_channel md ic
 
   let whnf x = Reduction.(Env.unsafe_reduction ~red:{default_cfg with target = Whnf} x)
+
+  let rec encode_pattern ?(ctx=[]) term = failwith "todo pattern"
 
   let rec encode_term ?(ctx=[]) t =
     match t with

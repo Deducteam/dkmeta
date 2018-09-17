@@ -28,6 +28,7 @@ let red_cfg : unit -> Reduction.red_cfg = fun () ->
     }
 
 let add_meta_rule r = config.meta_rules <- r::config.meta_rules
+
 (*
 let _meta_rules : Rule.rule_name list ref = ref []
 
