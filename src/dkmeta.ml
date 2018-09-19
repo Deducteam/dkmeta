@@ -1,147 +1,249 @@
-open Basic
+module Dkmeta =
+  struct
 
-let meta_files : string list ref = ref []
-let add_meta_file s =
-  meta_files := s::!meta_files
+    module type Encoding =
+      sig
+        val md : Basic.mident
 
-let meta_mds : Basic.mident list ref = ref []
-let add_meta_md md =
-  meta_mds := md::!meta_mds
+        val entries : unit -> Entry.entry list
 
-let mk_entry md safe =
-  let open Entry in
-  let open Rule in
-  let sg = Env.get_signature () in
-  function
-  | Decl(lc,id,st,ty) ->
-    if safe then
-      Env.declare lc id st ty
-    else
-      Signature.add_declaration sg lc id st ty
-  | Def(lc,id,opaque,ty_opt,te) ->
-    Config.add_meta_rule (Delta(mk_name md id));
-    if safe then
-      Env.define lc id opaque te ty_opt
-    else
-      let ty = match ty_opt with None -> assert false | Some ty -> ty in
-      Signature.add_declaration sg lc id Signature.Definable ty;
-      let cst = mk_name md id in
-      let rule = {name = Delta(cst); ctx= []; pat = Pattern(lc, cst, []); rhs = te} in
-      let rule = Rule.to_rule_infos rule in
-      Signature.add_rules sg [rule]
-  | Rules(lc,rs) ->
-    begin
-      if safe then
-        ignore(Env.add_rules rs)
-      else
-        let ri = List.map Rule.to_rule_infos rs in
-        Signature.add_rules sg ri
-    end;
-    List.iter (fun (r:untyped_rule) -> Config.add_meta_rule r.name) rs
-  | _ -> ()
+        val signature : Signature.t
 
-let run_on_meta_file safe file =
-  let open Config in
-  let input = open_in file in
-  begin
-  match config.encoding with
-  | None -> ()
-  | Some (module E) ->
-    ignore(Env.init  "lf");
-    List.iter (mk_entry E.md safe) (E.entries ())
-  end;
-  let md = Env.init file in
-  add_meta_md md;
-  Parser.handle_channel md (mk_entry md safe) input;
-  Errors.success "File '%s' was successfully checked." file;
-  Env.export ();
-  close_in input
+        val encode_term : Term.term -> Term.term
 
-let run_on_file file =
-  let import md = Env.import Basic.dloc md in
-  let input = open_in file in
-  let md = Env.init file in
-  List.iter import !meta_mds;
-  Parser.handle_channel md (Meta.mk_entry md) input;
-  Errors.success "File '%s' was successfully metaified." file;
-  close_in input
+        val decode_term : Term.term -> Term.term
 
-let set_debug_mode opts =
-  try  Env.set_debug_mode opts
-  with Env.DebugFlagNotRecognized c ->
-    if c = 'a' then
-      Debug.enable_flag Meta.D_meta
-    else
-      raise (Env.DebugFlagNotRecognized c)
-
-let _ =
-  let run_on_stdin = ref None  in
-  let unsafe = ref false in
-  let switch_beta_off () = Config.(config.beta <- false) in
-  let switch_everything () = Config.(config.everything <- true) in
-  let set_encoding enc =
-    if enc = "lfp" then
-      Config.(config.encoding <- Some (module Encoding.LFP))
-    else if enc = "lf" then
-      begin
-        Config.(config.encoding <- Some (module Encoding.LF));
-        unsafe := true
+        val encode_rule : 'a Rule.rule -> 'a Rule.rule
       end
-    else
-      Errors.fail_exit (-1) dloc "Unknown encoding '%s'" enc
-  in
-  let options = Arg.align
-    [ ( "-d"
-      , Arg.String set_debug_mode
-      , " flags enables debugging for all given flags" )
-    ; ( "-q"
-      , Arg.Unit (fun () -> Env.set_debug_mode "q")
-      , " Quiet mode (equivalent to -d 'q'" )
-    ; ("-m"
-      , Arg.String add_meta_file
-      , " The file containing the meta rules. It has to be typed checked" )
-    ; ("--encoding"
-      , Arg.String set_encoding
-      , " Encoding the Dedukti file. Only LF encoding is supported right now")
-    ; ("--unsafe"
-      , Arg.Set unsafe
-      , " Meta files are not type checked")
-    ; ("--everything"
-      , Arg.Unit switch_everything
-      , " Every rule are considered as meta. Subsume option -m")
-    ; ("--switch-beta-off"
-      , Arg.Unit switch_beta_off,
-      " switch off beta while normalizing terms")
-    ; ( "-stdin"
-      , Arg.String (fun n -> run_on_stdin := Some(n))
-      , " MOD Parses standard input using module name MOD" )
-    ; ( "-version"
-      , Arg.Unit (fun () -> Format.printf "Meta Dedukti %s@." Config.version)
-      , " Print the version number" )
-    ; ( "-I"
-      , Arg.String Basic.add_path
-      , " DIR Add the directory DIR to the load path" )
-    ; ( "-errors-in-snf"
-      , Arg.Set Errors.errors_in_snf
-      , " Normalize the types in error messages" )]
-  in
-  let usage = "Usage: " ^ Sys.argv.(0) ^ " [OPTION]... [FILE]...\n" in
-  let usage = usage ^ "Available options:" in
-  let files =
-    let files = ref [] in
-    Arg.parse options (fun f -> files := f :: !files) usage;
-    List.rev !files
-  in
-  try
-    List.iter (run_on_meta_file (not !unsafe)) !meta_files;
-    List.iter run_on_file files;
-    match !run_on_stdin with
-    | None   -> ()
-    | Some m ->
-      let md = Env.init m in
-      Parser.handle_channel md (Meta.mk_entry md) stdin;
-      Errors.success "Standard input was successfully checked.\n"
-  with
-  | Env.EnvError(l,e) -> Errors.fail_env_error l e
-  | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
-  | Exit                 -> exit 3
+
+
+
+    let version = "0.1"
+
+    type cfg = {
+        mutable meta_rules  : Rule.rule_name list option;
+        beta                : bool;
+        encoding            : (module Encoding) option;
+        sg                  : Signature.t
+      }
+
+    let default_config =
+      {
+        meta_rules = None;
+        beta = true;
+        encoding = None;
+        sg = Signature.make ""
+      }
+
+    let red_cfg : cfg -> Reduction.red_cfg = fun cfg ->
+      let open Reduction in
+      { default_cfg with
+        beta = cfg.beta;
+        target = Snf;
+        select = Some
+                   (fun r ->
+                     match cfg.meta_rules with
+                     | None -> true
+                     | Some meta_rules -> List.mem r meta_rules)
+      }
+
+    module LF =
+      struct
+        open Basic
+        open Term
+
+        let md = mk_mident "lf"
+
+        let entries () =
+          let mk_decl id =
+            Entry.Decl(dloc,mk_ident id, Signature.Definable,mk_Type dloc)
+          in
+          List.map mk_decl ["ty"; "var";"sym";"lam";"app";"prod"]
+
+        let signature =
+          let sg = Signature.make "lf" in
+          let mk_decl id =
+            Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
+          in
+          List.iter mk_decl ["ty"; "var";"sym";"lam";"app";"prod"];
+          sg
+
+        let name_of str = mk_name md (mk_ident str)
+
+        let const_of str = mk_Const dloc (name_of str)
+
+        let rec encode_term t =
+          match t with
+          | Kind -> assert false
+          | Type(lc) -> encode_type lc
+          | DB(lc,x,n) -> encode_DB lc x n
+          | Const(lc, name) -> encode_Const lc name
+          | Lam(lc,x,mty,te) -> encode_Lam lc x mty te
+          | App(f,a,args) -> encode_App f a args
+          | Pi(lc,x,a,b) -> encode_Pi lc x a b
+
+        and encode_type lc = (const_of "ty")
+
+        and encode_DB lc x n =
+          mk_App (const_of "var") (mk_DB lc x n) []
+
+        and encode_Const lc name =
+          mk_App (const_of "sym") (mk_Const dloc name) []
+
+        and encode_Lam lc x mty te =
+          let mty' = match mty with None -> None | Some ty -> Some (encode_term  ty) in
+          mk_App (const_of "lam") (mk_Lam dloc x mty' (encode_term  te)) []
+
+        and encode_App f a args =
+          mk_App (const_of "app") (encode_term  f) (List.map (encode_term ) (a::args))
+
+        and encode_Pi lc x a b =
+          mk_App (const_of "prod") (mk_Lam dloc x (Some (encode_term  a)) (encode_term  b)) []
+
+
+        (* Using typed context here does not make sense *)
+        let rec encode_pattern  pattern : Rule.pattern =
+          let open Rule in
+          match pattern with
+          | Var(lc, id, n, ps) -> Var(lc,id,n, List.map (encode_pattern ) ps)
+          | Brackets(term) -> Brackets(encode_term  term)
+          | Lambda(lc, id, p) -> Pattern(lc,(name_of "lam"), [(Lambda(lc,id, encode_pattern  p))])
+          | Pattern(lc,n,[]) ->
+             Pattern(lc,name_of "sym", [Pattern(lc,n,[])])
+          | Pattern(lc,n, ps) ->
+             Pattern(lc, name_of "app", (Pattern(lc,name_of "sym",[Pattern(lc,n,[])]))::(List.map (encode_pattern) ps))
+
+        let encode_rule (r:'a Rule.rule) =
+          let open Rule in
+          { r with
+            pat = encode_pattern r.pat;
+            rhs = encode_term r.rhs
+          }
+
+        let rec decode_term t =
+          match t with
+          | Kind -> assert false
+          | Type(lc) -> assert false
+          | DB(lc,x,n) -> decode_DB lc x n
+          | Const(lc,name) -> decode_Const lc name
+          | Lam(lc,x,mty,te) -> decode_Lam lc x mty te
+          | App(f,a,args) -> decode_App f a args
+          | Pi(lc,x,a,b) -> decode_Pi lc x a b
+
+        and decode_DB lc x n = mk_DB lc x n
+
+        and decode_Const lc name =
+          if name_eq name (name_of "ty") then mk_Type dloc else mk_Const lc name
+
+        and decode_Lam lc x mty te =
+          let mty' = match mty with None -> None | Some mty -> Some (decode_term mty) in
+          mk_Lam lc x mty' (decode_term te)
+
+        and decode_App f a args =
+          match f with
+          | Const(lc,name) ->
+             if name_eq name (name_of "prod") then
+               match a with
+               | Lam(_,x,Some a, b) -> mk_Pi dloc x (decode_term a) (decode_term b)
+               | _ -> assert false
+             else if name_eq name (name_of "sym") then
+               decode_term a
+             else if name_eq name (name_of "var") then
+               decode_term  a
+             else if name_eq name (name_of "app") then
+               mk_App2 (decode_term a) (List.map decode_term args)
+             else if name_eq name (name_of "lam") then
+               decode_term a
+             else
+               mk_App (decode_term f) (decode_term a) (List.map decode_term args)
+
+          | _ -> decode_App (decode_term f) (decode_term a) (List.map decode_term args)
+
+        and decode_Pi lc x a b = assert false
+      end
+
+    type Basic.Debug.flag += D_meta
+
+    let encode cfg term =
+      match cfg.encoding with
+      | None -> term
+      | Some (module E:Encoding) -> E.encode_term term
+
+    let decode cfg term =
+      match cfg.encoding with
+      | None -> term
+      | Some (module E:Encoding) -> E.decode_term term
+
+    let normalize cfg term =
+      let red = red_cfg cfg in
+      Reduction.reduction red cfg.sg term
+
+    let mk_term cfg term =
+      let term' = encode cfg term in
+      let term'' = normalize cfg term' in
+      decode cfg term''
+
+    exception Not_a_pattern
+
+    let rec pattern_of_term = fun t ->
+      let open Term in
+      match t with
+      | Kind
+        | Type _
+        | Pi _ -> raise Not_a_pattern
+      | Lam(lc,x,_,te) -> Rule.Lambda(lc,x,pattern_of_term te)
+      | App(Const(lc,name),a,args) ->
+         Rule.Pattern(lc,name, List.map pattern_of_term (a::args))
+      | App(DB(lc,x,n),a,args) ->
+         Rule.Var(lc,x, n, List.map pattern_of_term (a::args))
+      | Const(lc,name) ->
+         Rule.Pattern(lc,name, [])
+      | DB(lc,x,n) ->
+         Rule.Var(lc,x,n,[])
+      | _ -> raise Not_a_pattern
+
+    let mk_pattern cfg pat =
+      let t = Rule.pattern_to_term pat in
+      let t' = mk_term cfg t in
+      pattern_of_term t'
+
+    let mk_entry = fun cfg md entry ->
+      let open Entry in
+      let open Rule in
+      match entry with
+      | Decl(lc,id,st,ty) ->
+         begin
+           match cfg.meta_rules with
+           | None -> Signature.add_declaration cfg.sg lc id Signature.Definable ty;
+           | Some _ -> ()
+         end;
+         Decl(lc,id,st,mk_term cfg ty)
+      | Def(lc,id,opaque, Some ty,te) ->
+         begin
+           match cfg.meta_rules with
+           | None ->
+              let cst = Basic.mk_name md id in
+              let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
+              Signature.add_declaration cfg.sg lc id Signature.Definable ty;
+              Signature.add_rules cfg.sg (List.map Rule.to_rule_infos [rule])
+           | _ -> ()
+         end;
+         Def(lc,id,opaque,Some (mk_term cfg ty), mk_term cfg te)
+      | Def(lc,id,opaque, None,te) ->
+         failwith "type is missing and Dedukti is buggy so no location"
+      | Rules(lc,rs) ->
+         let normalize_rule (r : 'a rule) : 'a rule =
+           { r with
+             pat = mk_pattern cfg r.pat;
+             rhs = mk_term cfg r.rhs
+           }
+         in
+         let rs' = List.map normalize_rule rs in
+         begin
+           match cfg.meta_rules with (* If None, everything is meta *)
+           | None -> Signature.add_rules cfg.sg (List.map to_rule_infos rs')
+           | _ -> ()
+         end;
+         Rules(lc,rs')
+      | _ -> entry
+  end

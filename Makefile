@@ -4,7 +4,7 @@ VERSION = 0.1
 # Compile with "make Q=" to display the commands that are run.
 Q = @
 
-all: dkmeta.native dkmeta
+all: main.native dkmeta
 
 #### Compilation of the kernel library #######################################
 
@@ -29,11 +29,11 @@ _build/src/dkmeta.cmxa: $(DKMETA_MLI) $(DKMETA_ML)
 #### Compilation of dkmeta ########################################
 
 .PHONY:
-commands: dkmeta.native
+commands: main.native
 
-dkmeta.native: $(wildcard src/*.ml src/*.mli)
+main.native: $(wildcard src/*.ml src/*.mli)
 	@echo "[OPT] $@"
-	$(Q)ocamlbuild -quiet -package dedukti -use-ocamlfind src/dkmeta.native
+	$(Q)ocamlbuild -quiet -package dedukti -use-ocamlfind src/main.native
 
 clean:
 	$(Q)ocamlbuild -quiet -clean
