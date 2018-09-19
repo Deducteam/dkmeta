@@ -67,4 +67,4 @@ install: META uninstall all
 		_build/src/dkmeta.cmxa \
 		_build/src/dkmeta.a
 	install -m 755 -d $(BINDIR)
-	install -m 755 -p dkmeta.native  $(BINDIR)dkmeta
+	install -m 755 -p main.native  $(BINDIR)dkmeta

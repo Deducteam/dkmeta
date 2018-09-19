@@ -9,27 +9,6 @@ let meta_mds : Basic.mident list ref = ref []
 let add_meta_md md =
   meta_mds := md::!meta_mds
 
-let to_signature : mident -> Entry.entry list -> Signature.t = fun md entries ->
-  let open Entry in
-  let sg = Signature.make (string_of_mident md) in
-  let mk_entry = function
-    | Decl(lc,id,st,ty) ->
-       Signature.add_declaration sg lc id st ty
-    | Def(lc,id,op,Some ty,te) ->
-       let open Rule in
-       let _ = Signature.add_declaration sg lc id Signature.Definable ty in
-       let cst = mk_name md id in
-       let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
-       Signature.add_rules sg [Rule.to_rule_infos rule]
-    | Def(lc,id,op, None,te) ->
-       Errors.fail_exit (-1) dloc "All the types should be given"
-    | Rules(lc,rs) ->
-       Signature.add_rules sg (List.map Rule.to_rule_infos rs)
-    | _ -> ()
-  in
-  List.iter mk_entry entries;
-  sg
-
 let run_on_meta_file cfg file =
   let open Dkmeta in
   let input = open_in file in
@@ -60,7 +39,7 @@ let set_debug_mode opts =
   try  Env.set_debug_mode opts
   with Env.DebugFlagNotRecognized c ->
     if c = 'a' then
-      Debug.enable_flag Meta.D_meta
+      Debug.enable_flag Dkmeta.D_meta
     else
       raise (Env.DebugFlagNotRecognized c)
 
