@@ -212,7 +212,7 @@ let mk_entry = fun cfg md entry ->
       | None -> Signature.add_declaration cfg.sg lc id Signature.Definable ty;
       | Some _ -> ()
     end;
-    Decl(lc,id,st,mk_term cfg ty)
+    Decl(lc,id, st , mk_term cfg ty)
   | Def(lc,id,opaque, Some ty,te) ->
     begin
       match cfg.meta_rules with
@@ -242,23 +242,55 @@ let mk_entry = fun cfg md entry ->
     Rules(lc,rs')
   | _ -> entry
 
-let to_signature : Basic.mident -> ?sg:Signature.t -> Entry.entry list -> Signature.t =
-  fun md ?(sg=Signature.make (Basic.string_of_mident md)) entries ->
-  let open Entry in
+let to_signature : string -> ?sg:Signature.t -> Entry.entry list -> Signature.t =
+  fun path ?(sg=Signature.make path) entries ->
+    let open Entry in
+    (* FIXME: so hackish *)
+    let md = Signature.get_name (Signature.make path) in
+    let mk_entry = function
+      | Decl(lc,id,st,ty) ->
+        Signature.add_external_declaration sg lc (Basic.mk_name md id) st ty
+      | Def(lc,id,op,Some ty,te) ->
+        let open Rule in
+        Signature.add_external_declaration sg lc (Basic.mk_name md id) Signature.Definable ty;
+        let cst = Basic.mk_name md id in
+        let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
+        Signature.add_rules sg [Rule.to_rule_infos rule]
+      | Def(lc,id,op, None,te) ->
+        Errors.fail_exit (-1) Basic.dloc "All the types should be given"
+      | Rules(lc,rs) ->
+        Signature.add_rules sg (List.map Rule.to_rule_infos rs)
+      | Require(lc,md) -> Signature.import sg lc md
+      | _ -> ()
+    in
+    List.iter mk_entry entries;
+    sg
+
+let dummy_name = ""
+let dummy_signature () = Signature.make dummy_name
+
+let add_rule sg r =
+  Signature.add_rules sg [(Rule.to_rule_infos r)]
+
+(* Several rules might be bound to different constants *)
+let add_rules sg rs = List.iter (add_rule sg) rs
+
+let meta_of_file : ?sg:Signature.t -> bool -> string -> cfg = fun ?(sg=dummy_signature ()) encode file ->
+  let ic = open_in file in
   let mk_entry = function
-    | Decl(lc,id,st,ty) ->
-       Signature.add_declaration sg lc id st ty
-    | Def(lc,id,op,Some ty,te) ->
-       let open Rule in
-       let _ = Signature.add_declaration sg lc id Signature.Definable ty in
-       let cst = Basic.mk_name md id in
-       let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
-       Signature.add_rules sg [Rule.to_rule_infos rule]
-    | Def(lc,id,op, None,te) ->
-       Errors.fail_exit (-1) Basic.dloc "All the types should be given"
-    | Rules(lc,rs) ->
-       Signature.add_rules sg (List.map Rule.to_rule_infos rs)
-    | _ -> ()
+    | Entry.Rules(_,rs) -> rs
+    | _ -> assert false
   in
-  List.iter mk_entry entries;
-  sg
+  let md = Basic.mk_mident file in
+  let entries = Parser.Parse_channel.parse md ic in
+  let rules = List.fold_left (fun r e -> r@mk_entry e) [] entries in
+  let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
+  if encode then Signature.import_signature sg LF.signature;
+  let encoded_rules = if encode then List.map LF.encode_rule rules else rules in
+  add_rules sg encoded_rules;
+  {
+    beta = true;
+    encoding = if encode then Some (module LF) else None;
+    sg ;
+    meta_rules = Some rule_names
+  }

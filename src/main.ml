@@ -1,6 +1,7 @@
 open Basic
 open Dkmeta
 
+
 let meta_files : string list ref = ref []
 let add_meta_file s =
   meta_files := s::!meta_files
@@ -19,8 +20,8 @@ let run_on_meta_file cfg file =
   in
   Signature.import_signature cfg.sg sg_enc;
   let md = Env.init file in
-  let entries = Parser.parse_channel md input in
-  let sg_meta = to_signature md entries in
+  let entries = Parser.Parse_channel.parse md input in
+  let sg_meta = to_signature file entries in
   close_in input;
   Signature.import_signature cfg.sg sg_meta
 
@@ -29,7 +30,7 @@ let run_on_file cfg file =
   let input = open_in file in
   let md = Env.init file in
   List.iter import !meta_mds;
-  let entries = Parser.parse_channel md input in
+  let entries = Parser.Parse_channel.parse md input in
   let entries' = List.map (Dkmeta.mk_entry cfg md) entries in
   List.iter (Format.printf "%a@." Pp.print_entry) entries';
   Errors.success "File '%s' was successfully metaified." file;
@@ -104,7 +105,7 @@ let _ =
        let mk_entry e =
          Format.printf "%a@." Pp.print_entry (Dkmeta.mk_entry cfg md e)
        in
-       Parser.handle_channel md mk_entry stdin;
+       Parser.Parse_channel.handle md mk_entry stdin;
        Errors.success "Standard input was successfully checked.\n"
   with
   | Env.EnvError(l,e) -> Errors.fail_env_error l e
