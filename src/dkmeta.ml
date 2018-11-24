@@ -275,22 +275,25 @@ let add_rule sg r =
 (* Several rules might be bound to different constants *)
 let add_rules sg rs = List.iter (add_rule sg) rs
 
-let meta_of_file : ?sg:Signature.t -> bool -> string -> cfg = fun ?(sg=dummy_signature ()) encode file ->
-  let ic = open_in file in
-  let mk_entry = function
-    | Entry.Rules(_,rs) -> rs
-    | _ -> assert false
-  in
-  let md = Basic.mk_mident file in
-  let entries = Parser.Parse_channel.parse md ic in
-  let rules = List.fold_left (fun r e -> r@mk_entry e) [] entries in
-  let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
-  if encode then Signature.import_signature sg LF.signature;
-  let encoded_rules = if encode then List.map LF.encode_rule rules else rules in
-  add_rules sg encoded_rules;
-  {
-    beta = true;
-    encoding = if encode then Some (module LF) else None;
-    sg ;
-    meta_rules = Some rule_names
-  }
+let meta_of_file :  bool ->  ?sg:Signature.t -> string -> cfg =
+  fun encode ->
+    let sg = dummy_signature () in
+    fun ?(sg=sg) file ->
+    let ic = open_in file in
+    let mk_entry = function
+      | Entry.Rules(_,rs) -> rs
+      | _ -> assert false
+    in
+    let md = Basic.mk_mident file in
+    let entries = Parser.Parse_channel.parse md ic in
+    let rules = List.fold_left (fun r e -> r@mk_entry e) [] entries in
+    let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
+    if encode then Signature.import_signature sg LF.signature;
+    let encoded_rules = if encode then List.map LF.encode_rule rules else rules in
+    add_rules sg encoded_rules;
+    {
+      beta = true;
+      encoding = if encode then Some (module LF) else None;
+      sg ;
+      meta_rules = Some rule_names
+    }
