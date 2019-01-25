@@ -1,0 +1,5 @@
+#REQUIRE l.
+
+nat : l.type.
+
+f : l.eta nat -> l.eta nat.

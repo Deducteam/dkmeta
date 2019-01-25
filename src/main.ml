@@ -23,7 +23,8 @@ let run_on_meta_file cfg file =
   let entries = Parser.Parse_channel.parse md input in
   let sg_meta = to_signature file entries in
   close_in input;
-  Signature.import_signature cfg.sg sg_meta
+  Signature.import_signature cfg.sg sg_meta;
+  Format.eprintf "coucou@."
 
 let run_on_file cfg file =
   let import md = Env.import Basic.dloc md in

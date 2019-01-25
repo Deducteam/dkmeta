@@ -1,0 +1,7 @@
+type : Type.
+
+def eta : type -> Type.
+
+arr : type -> type -> type.
+
+[A,B] eta (arr A B) --> eta A -> eta B.

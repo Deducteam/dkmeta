@@ -1,0 +1,3 @@
+#REQUIRE l.
+
+[] lf.prod (l.eta A) (x => l.eta B) --> l.eta (l.arr A B).
