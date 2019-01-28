@@ -42,6 +42,97 @@ let red_cfg : cfg -> Reduction.red_cfg = fun cfg ->
            | Some meta_rules -> List.mem r meta_rules)
   }
 
+module PROD =
+struct
+  open Basic
+  open Term
+
+  let md = mk_mident "prod"
+
+  let entries () =
+    let mk_decl id =
+      Entry.Decl(dloc,mk_ident id, Signature.Definable,mk_Type dloc)
+    in
+    List.map mk_decl ["prod"]
+
+  let signature =
+    let sg = Signature.make "prod" in
+    let mk_decl id =
+      Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
+    in
+    List.iter mk_decl ["prod"]; sg
+
+  let name_of str = mk_name md (mk_ident str)
+
+  let const_of str = mk_Const dloc (name_of str)
+
+  let rec encode_term t =
+    match t with
+    | Kind -> assert false
+    | Type(lc) -> encode_type lc
+    | DB(lc,x,n) -> encode_DB lc x n
+    | Const(lc, name) -> encode_Const lc name
+    | Lam(lc,x,mty,te) -> encode_Lam lc x mty te
+    | App(f,a,args) -> encode_App f a args
+    | Pi(lc,x,a,b) -> encode_Pi lc x a b
+
+  and encode_type lc = mk_Type lc
+
+  and encode_DB lc x n = mk_DB lc x n
+
+  and encode_Const lc name = mk_Const dloc name
+
+  and encode_Lam lc x mty te =
+    let mty' = match mty with None -> None | Some ty -> Some (encode_term  ty) in
+    mk_Lam dloc x mty' (encode_term  te)
+
+  and encode_App f a args =
+    mk_App2 (encode_term  f) (List.map (encode_term ) (a::args))
+
+  and encode_Pi lc x a b =
+    mk_App (const_of "prod") (encode_term a) [mk_Lam dloc x (Some (encode_term  a)) (encode_term  b)]
+
+  (* Using typed context here does not make sense *)
+  let rec encode_pattern  pattern : Rule.pattern = pattern
+
+  let encode_rule (r:'a Rule.rule) =
+    let open Rule in
+    { r with
+      pat = encode_pattern r.pat;
+      rhs = encode_term r.rhs
+    }
+
+  let rec decode_term t =
+    match t with
+    | Kind -> assert false
+    | Pi(lc,x,a,b) -> assert false
+    | App(f,a,args) -> decode_App f a args
+    | Lam(lc,x,mty,te) -> decode_Lam lc x mty te
+    | Type _
+    | DB _
+    | Const _ -> t
+
+  and decode_Lam lc x mty te =
+    let mty' = match mty with None -> None | Some mty -> Some (decode_term mty) in
+    mk_Lam lc x mty' (decode_term te)
+
+  and decode_App f a args =
+    match f with
+    | Const(lc,name) ->
+      begin
+        if name_eq name (name_of "prod") then
+          match a with
+          | App(_,Lam(_,x,Some a, b),[]) -> mk_Pi dloc x (decode_term a) (decode_term b)
+          | _ -> assert false
+        else
+            mk_App (decode_term f) (decode_term a) (List.map decode_term args)
+      end
+    | _ -> decode_App (decode_term f) (decode_term a) (List.map decode_term args)
+
+  and decode_Pi lc x a b = assert false
+
+end
+
 module LF =
 struct
   open Basic
@@ -171,11 +262,19 @@ let decode cfg term =
 
 let normalize cfg term =
   let red = red_cfg cfg in
+  begin
+  match cfg.meta_rules with
+  | Some l -> Format.eprintf "%d@." (List.length l)
+  | None -> Format.eprintf "NON@."
+end;
   Reduction.reduction red cfg.sg term
 
 let mk_term cfg term =
+  Format.eprintf "b:%a@." Pp.print_term term;
   let term' = encode cfg term in
+  Format.eprintf "a:%a@." Pp.print_term term';
   let term'' = normalize cfg term' in
+  Format.eprintf "n:%a@." Pp.print_term term'';
   decode cfg term''
 
 exception Not_a_pattern
@@ -205,6 +304,7 @@ let mk_pattern cfg pat =
 let mk_entry = fun cfg md entry ->
   let open Entry in
   let open Rule in
+  Format.eprintf "%a@." Entry.pp_entry entry;
   match entry with
   | Decl(lc,id,st,ty) ->
     begin
@@ -242,30 +342,6 @@ let mk_entry = fun cfg md entry ->
     Rules(lc,rs')
   | _ -> entry
 
-let to_signature : string -> ?sg:Signature.t -> Entry.entry list -> Signature.t =
-  fun path ?(sg=Signature.make path) entries ->
-    let open Entry in
-    (* FIXME: so hackish *)
-    let md = Signature.get_name (Signature.make path) in
-    let mk_entry = function
-      | Decl(lc,id,st,ty) ->
-        Signature.add_external_declaration sg lc (Basic.mk_name md id) st ty
-      | Def(lc,id,op,Some ty,te) ->
-        let open Rule in
-        Signature.add_external_declaration sg lc (Basic.mk_name md id) Signature.Definable ty;
-        let cst = Basic.mk_name md id in
-        let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
-        Signature.add_rules sg [Rule.to_rule_infos rule]
-      | Def(lc,id,op, None,te) ->
-        Errors.fail_exit (-1) Basic.dloc "All the types should be given"
-      | Rules(lc,rs) ->
-        Signature.add_rules sg (List.map Rule.to_rule_infos rs)
-      | Require(lc,md) -> Signature.import sg lc md
-      | _ -> ()
-    in
-    List.iter mk_entry entries;
-    sg
-
 let dummy_name = ""
 let dummy_signature () = Signature.make dummy_name
 
@@ -275,25 +351,24 @@ let add_rule sg r =
 (* Several rules might be bound to different constants *)
 let add_rules sg rs = List.iter (add_rule sg) rs
 
-let meta_of_file :  bool ->  ?sg:Signature.t -> string -> cfg =
-  fun encode ->
-    let sg = dummy_signature () in
-    fun ?(sg=sg) file ->
+let meta_of_file : cfg -> string -> cfg =
+  fun cfg file ->
     let ic = open_in file in
     let mk_entry = function
       | Entry.Rules(_,rs) -> rs
-      | _ -> assert false
+      | _ -> []
     in
     let md = Basic.mk_mident file in
     let entries = Parser.Parse_channel.parse md ic in
     let rules = List.fold_left (fun r e -> r@mk_entry e) [] entries in
+    List.iter (fun r -> Format.eprintf "d:%a@." Rule.pp_rule_infos (Rule.to_rule_infos r)) rules;
     let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
-    if encode then Signature.import_signature sg LF.signature;
-    let encoded_rules = if encode then List.map LF.encode_rule rules else rules in
-    add_rules sg encoded_rules;
-    {
-      beta = true;
-      encoding = if encode then Some (module LF) else None;
-      sg ;
-      meta_rules = Some rule_names
-    }
+    let encoded_rules =
+      match cfg.encoding with
+      | None -> rules
+      | Some (module E) ->
+        Signature.import_signature cfg.sg E.signature;
+        List.map E.encode_rule rules
+    in
+    add_rules cfg.sg encoded_rules;
+    { cfg with meta_rules = Some rule_names }

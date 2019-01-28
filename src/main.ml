@@ -1,6 +1,7 @@
 open Basic
 open Dkmeta
 
+let _ = Signature.unsafe := true
 
 let meta_files : string list ref = ref []
 let add_meta_file s =
@@ -9,22 +10,6 @@ let add_meta_file s =
 let meta_mds : Basic.mident list ref = ref []
 let add_meta_md md =
   meta_mds := md::!meta_mds
-
-let run_on_meta_file cfg file =
-  let open Dkmeta in
-  let input = open_in file in
-  let sg_enc =
-    match cfg.encoding with
-    | None -> Signature.make ""
-    | Some (module E) -> E.signature
-  in
-  Signature.import_signature cfg.sg sg_enc;
-  let md = Env.init file in
-  let entries = Parser.Parse_channel.parse md input in
-  let sg_meta = to_signature file entries in
-  close_in input;
-  Signature.import_signature cfg.sg sg_meta;
-  Format.eprintf "coucou@."
 
 let run_on_file cfg file =
   let import md = Env.import Basic.dloc md in
@@ -52,7 +37,9 @@ let _ =
   let encoding : (module Dkmeta.Encoding) option ref = ref None in
   let set_encoding enc =
     if enc = "lf" then
-        encoding := Some (module Dkmeta.LF)
+      encoding := Some (module Dkmeta.LF)
+    else if enc = "prod" then
+      encoding := Some (module Dkmeta.PROD)
     else
       Errors.fail_exit (-1) dloc "Unknown encoding '%s'" enc
   in
@@ -65,10 +52,10 @@ let _ =
       , " Quiet mode (equivalent to -d 'q'" )
     ; ("-m"
       , Arg.String add_meta_file
-      , " The file containing the meta rules. It has to be typed checked first" )
+      , " The file containing the meta rules. It has to be typed checked first")
     ; ("--encoding"
       , Arg.String set_encoding
-      , " Encoding the Dedukti file. Only LF encoding is supported right now")
+      , " Encoding the Dedukti file.")
     ; ("--switch-beta-off"
       , Arg.Unit switch_beta_off,
       " switch off beta while normalizing terms")
@@ -97,7 +84,8 @@ let _ =
     })
   in
   try
-    List.iter (run_on_meta_file cfg) !meta_files;
+    let cfg = List.fold_left Dkmeta.meta_of_file cfg !meta_files in
+    Errors.success "Meta file parsed.@.";
     List.iter (run_on_file cfg) files;
     match !run_on_stdin with
     | None   -> ()
@@ -107,8 +95,9 @@ let _ =
          Format.printf "%a@." Pp.print_entry (Dkmeta.mk_entry cfg md e)
        in
        Parser.Parse_channel.handle md mk_entry stdin;
-       Errors.success "Standard input was successfully checked.\n"
+       Errors.success "Standard input was successfully checked.@."
   with
+  | Signature.SignatureError sg -> Errors.fail_env_error dloc (Env.EnvErrorSignature sg)
   | Env.EnvError(l,e) -> Errors.fail_env_error l e
   | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
   | Exit                 -> exit 3
