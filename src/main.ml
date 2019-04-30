@@ -17,6 +17,7 @@ let run_on_file cfg file =
   let md = Env.init file in
   List.iter import !meta_mds;
   let entries = Parser.Parse_channel.parse md input in
+  Dkmeta.init file;
   let entries' = List.map (Dkmeta.mk_entry cfg md) entries in
   List.iter (Format.printf "%a@." Pp.print_entry) entries';
   Errors.success "File '%s' was successfully metaified." file;
@@ -33,6 +34,7 @@ let set_debug_mode opts =
 let _ =
   let run_on_stdin = ref None  in
   let beta = ref true in
+  let stats = ref false in
   let switch_beta_off () = beta := false in
   let encoding : (module Dkmeta.Encoding) option ref = ref None in
   let set_encoding enc =
@@ -40,6 +42,8 @@ let _ =
       encoding := Some (module Dkmeta.LF)
     else if enc = "prod" then
       encoding := Some (module Dkmeta.PROD)
+    else if enc = "app" then
+      encoding := Some (module Dkmeta.APP)
     else
       Errors.fail_exit (-1) dloc "Unknown encoding '%s'" enc
   in
@@ -52,7 +56,7 @@ let _ =
       , " Quiet mode (equivalent to -d 'q'" )
     ; ("-m"
       , Arg.String add_meta_file
-      , " The file containing the meta rules. It has to be typed checked first")
+      , " The file containing the meta rules.")
     ; ("--encoding"
       , Arg.String set_encoding
       , " Encoding the Dedukti file.")
@@ -65,6 +69,9 @@ let _ =
     ; ( "-version"
       , Arg.Unit (fun () -> Format.printf "Meta Dedukti %s@." Dkmeta.version)
       , " Print the version number" )
+    ; ( "--stats"
+      , Arg.Unit (fun () -> stats := true)
+      , " Print statistics" )
     ; ( "-I"
       , Arg.String Basic.add_path
       , " DIR Add the directory DIR to the load path" )]
@@ -84,20 +91,27 @@ let _ =
     })
   in
   try
-    let cfg = List.fold_left Dkmeta.meta_of_file cfg !meta_files in
-    Errors.success "Meta file parsed.@.";
-    List.iter (run_on_file cfg) files;
-    match !run_on_stdin with
-    | None   -> ()
-    | Some m ->
-       let md = Env.init m in
-       let mk_entry e =
-         Format.printf "%a@." Pp.print_entry (Dkmeta.mk_entry cfg md e)
-       in
-       Parser.Parse_channel.handle md mk_entry stdin;
-       Errors.success "Standard input was successfully checked.@."
+    if !stats then
+      begin
+        List.iter Stats.run_on_meta_file !meta_files;
+        List.iter Stats.run_on_file files
+      end
+    else
+      let cfg = List.fold_left (fun cfg f -> Dkmeta.meta_of_file f cfg) cfg !meta_files in
+      Errors.success "Meta file parsed.@.";
+      List.iter (run_on_file cfg) files;
+      match !run_on_stdin with
+      | None   -> ()
+      | Some m ->
+        let md = Env.init m in
+        let mk_entry e =
+          Format.printf "%a@." Pp.print_entry (Dkmeta.mk_entry cfg md e)
+        in
+        Parser.Parse_channel.handle md mk_entry stdin;
+        Errors.success "Standard input was successfully checked.@."
   with
   | Signature.SignatureError sg -> Errors.fail_env_error dloc (Env.EnvErrorSignature sg)
   | Env.EnvError(l,e) -> Errors.fail_env_error l e
+  | Typing.TypingError t -> Errors.fail_env_error Basic.dloc (Env.EnvErrorType t)
   | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
   | Exit                 -> exit 3
