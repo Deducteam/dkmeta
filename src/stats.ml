@@ -109,7 +109,7 @@ struct
     try are_convertible_lst sg [(t1,t2)]
     with NotConvertible -> false
 
-  let matching_test _ = are_convertible
+  let matching_test _ _ = are_convertible
 end
 
 module T : Typing.Typer = Typing.Make(R)
