@@ -433,9 +433,7 @@ let normalize cfg term =
 let sg = ref (Signature.make "")
 
 let init f =
-  sg := Signature.make f;
-  Format.printf "%a@." Pp.print_mident (Signature.get_name !sg)
-
+  sg := Signature.make f
 
 let mk_term cfg term =
   (* Format.eprintf "b:%a@." Pp.print_term term; *)
@@ -540,7 +538,7 @@ let meta_of_file : string -> ?md:Basic.mident -> cfg -> cfg =
     | _ -> []
   in
   let entries = Parser.Parse_channel.parse md ic in
-  let rules = List.fold_left (fun r e -> r@mk_entry e) [] entries in
+  let rules =  List.flatten @@ List.fold_left (fun r e -> (mk_entry e)::r) [] entries in
   let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
   (* Fixme: why do we encode rules???? *)
   (*

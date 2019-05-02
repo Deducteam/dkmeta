@@ -98,7 +98,7 @@ let _ =
       end
     else
       let cfg = List.fold_left (fun cfg f -> Dkmeta.meta_of_file f cfg) cfg !meta_files in
-      Errors.success "Meta file parsed.@.";
+      Errors.success "Meta files parsed.@.";
       List.iter (run_on_file cfg) files;
       match !run_on_stdin with
       | None   -> ()
