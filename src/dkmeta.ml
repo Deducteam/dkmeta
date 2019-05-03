@@ -17,8 +17,18 @@ end
 
 let version = "0.1"
 
+let rule_name_compare r r' =
+  let open Rule in
+  match r,r' with
+  | Beta, Beta -> 0
+  | Gamma(b,n), Gamma(b',n') when b = b' -> compare n n'
+  | Delta n, Delta n' -> compare n n'
+  | _ -> -1
+
+module RNS = Set.Make(struct type t = Rule.rule_name let compare = rule_name_compare end)
+
 type cfg = {
-  mutable meta_rules  : Rule.rule_name list option;
+  mutable meta_rules  : RNS.t option;
   beta                : bool;
   encoding            : (module Encoding) option;
   sg                  : Signature.t
@@ -42,7 +52,7 @@ let red_cfg : cfg -> Reduction.red_cfg = fun cfg ->
         (fun r ->
            match cfg.meta_rules with
            | None -> true
-           | Some meta_rules -> List.mem r meta_rules)
+           | Some meta_rules -> RNS.mem r meta_rules)
   }
 
 module PROD =
@@ -484,6 +494,7 @@ let mk_entry = fun cfg md entry ->
   let open Rule in
   match entry with
   | Decl(lc,id,st,ty) ->
+    Format.eprintf "%a@." Basic.pp_ident id;
     Signature.add_declaration !sg lc id st ty;
     begin
       match cfg.meta_rules with
@@ -493,6 +504,7 @@ let mk_entry = fun cfg md entry ->
     let ty' = mk_term cfg ty in
     Decl(lc,id, st , ty')
   | Def(lc,id,opaque, Some ty,te) ->
+    Format.eprintf "%a@." Basic.pp_ident id;
     let cst = Basic.mk_name md id in
     let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
     Signature.add_declaration !sg lc id Signature.Definable ty;
@@ -553,6 +565,6 @@ let meta_of_file : string -> ?md:Basic.mident -> cfg -> cfg =
   add_rules cfg.sg rules;
   match cfg.meta_rules with
   | None ->
-    { cfg with meta_rules = Some rule_names}
+    { cfg with meta_rules = Some (RNS.of_list rule_names)}
   | Some mrules ->
-    { cfg with meta_rules = Some (rule_names@mrules) }
+    { cfg with meta_rules = Some (RNS.union (RNS.of_list (rule_names)) mrules) }
