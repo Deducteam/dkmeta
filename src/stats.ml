@@ -85,7 +85,7 @@ let logger = fun _ rn b a ->
   List.iter (print_flag Format.std_formatter name loc rn b a) flags
 
 
-module R : Reduction.RE =
+module R : Reduction.S =
 struct
   open Reduction
 
@@ -112,7 +112,7 @@ struct
   let matching_test _ _ = are_convertible
 end
 
-module T : Typing.Typer = Typing.Make(R)
+module T : Typing.S = Typing.Make(R)
 
 let sg = ref (Signature.make "")
 

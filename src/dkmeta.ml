@@ -328,7 +328,7 @@ struct
 
   and encode_app2 sg ctx f args =
     let rec aux f f' a =
-      let tyf = Typing.TypingDefault.infer sg ctx f in
+      let tyf = Typing.Default.infer sg ctx f in
       let tyf' =
         begin
           match tyf with
@@ -361,7 +361,7 @@ struct
       Pattern(lc, name_of "app", Pattern(lc, name_of "coucou", [])::((Pattern(lc,name_of "sym",[Pattern(lc,n,[])])))::(encode_pattern sg ctx a)::[])
 *)
   let encode_rule = fun sg r ->
-    let _,r' = Typing.TypingDefault.typed_rule_of_rule_infos sg (Rule.to_rule_infos r) in
+    let _,r' = Typing.Default.typed_rule_of_rule_infos sg (Rule.to_rule_infos r) in
     let open Rule in
     { r with
       pat = encode_pattern sg r'.ctx r.pat;
@@ -418,8 +418,6 @@ struct
 
   and decode_Pi lc x a b = assert false
 end
-
-type Basic.Debug.flag += D_meta
 
 let encode sg cfg term =
   match cfg.encoding with
@@ -489,13 +487,21 @@ let mk_rule cfg (r: 'a Term.context Rule.rule) =
   let t' = mk_term cfg t in
   pattern_of_term t' *)
 
+module D = Basic.Debug
+type D.flag += D_meta
+let _ = D.register_flag D_meta "Dkmeta"
+
+let bmag fmt = "\027[90m" ^^ fmt ^^ "\027[0m%!"
+
+let log fmt = D.debug D_meta (bmag fmt)
+
 let mk_entry = fun cfg md entry ->
   let open Entry in
   let open Rule in
   match entry with
   | Decl(lc,id,st,ty) ->
-    Format.eprintf "%a@." Basic.pp_ident id;
-    Signature.add_declaration !sg lc id st ty;
+    log "%a" Basic.pp_ident id;
+    (* Signature.add_declaration !sg lc id st ty; *)
     begin
       match cfg.meta_rules with
       | None -> Signature.add_declaration cfg.sg lc id Signature.Definable ty;
@@ -504,11 +510,12 @@ let mk_entry = fun cfg md entry ->
     let ty' = mk_term cfg ty in
     Decl(lc,id, st , ty')
   | Def(lc,id,opaque, Some ty,te) ->
-    Format.eprintf "%a@." Basic.pp_ident id;
+    log "%a" Basic.pp_ident id;
     let cst = Basic.mk_name md id in
     let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
+    (*
     Signature.add_declaration !sg lc id Signature.Definable ty;
-    Signature.add_rules !sg (List.map Rule.to_rule_infos [rule]);
+      Signature.add_rules !sg (List.map Rule.to_rule_infos [rule]); *)
     begin
       match cfg.meta_rules with
       | None ->
@@ -522,7 +529,7 @@ let mk_entry = fun cfg md entry ->
   | Def(lc,id,opaque, None,te) ->
     failwith "type is missing and Dedukti is buggy so no location"
   | Rules(lc,rs) ->
-    Signature.add_rules !sg (List.map Rule.to_rule_infos rs);
+    (* Signature.add_rules !sg (List.map Rule.to_rule_infos rs); *)
     let rs' = List.map (mk_rule cfg) rs in
     begin
       match cfg.meta_rules with (* If None, everything is meta *)
@@ -542,6 +549,15 @@ let add_rule sg r =
 (* Several rules might be bound to different constants *)
 let add_rules sg rs = List.iter (add_rule sg) rs
 
+let meta_of_rules : Rule.untyped_rule list -> cfg -> cfg = fun rules cfg ->
+  let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
+  add_rules cfg.sg rules;
+  match cfg.meta_rules with
+  | None ->
+    { cfg with meta_rules = Some (RNS.of_list rule_names)}
+  | Some mrules ->
+    { cfg with meta_rules = Some (RNS.union (RNS.of_list (rule_names)) mrules) }
+
 let meta_of_file : string -> ?md:Basic.mident -> cfg -> cfg =
   fun file ?md:(md=Basic.mk_mident file) cfg ->
   let ic = open_in file in
@@ -551,20 +567,4 @@ let meta_of_file : string -> ?md:Basic.mident -> cfg -> cfg =
   in
   let entries = Parser.Parse_channel.parse md ic in
   let rules =  List.flatten @@ List.fold_left (fun r e -> (mk_entry e)::r) [] entries in
-  let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
-  (* Fixme: why do we encode rules???? *)
-  (*
-  let encoded_rules =
-    match cfg.encoding with
-    | None -> rules
-    | Some (module E) ->
-      Signature.import_signature cfg.sg E.signature;
-      List.map E.encode_rule rules
-  in
-*)
-  add_rules cfg.sg rules;
-  match cfg.meta_rules with
-  | None ->
-    { cfg with meta_rules = Some (RNS.of_list rule_names)}
-  | Some mrules ->
-    { cfg with meta_rules = Some (RNS.union (RNS.of_list (rule_names)) mrules) }
+  meta_of_rules rules cfg

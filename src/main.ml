@@ -1,6 +1,8 @@
 open Basic
 open Dkmeta
 
+module E = Env.Default
+
 let _ = Signature.unsafe := true
 
 let meta_files : string list ref = ref []
@@ -12,9 +14,9 @@ let add_meta_md md =
   meta_mds := md::!meta_mds
 
 let run_on_file cfg file =
-  let import md = Env.import Basic.dloc md in
+  let import md = E.import Basic.dloc md in
   let input = open_in file in
-  let md = Env.init file in
+  let md = E.init file in
   List.iter import !meta_mds;
   let entries = Parser.Parse_channel.parse md input in
   Dkmeta.init file;
@@ -48,7 +50,10 @@ let _ =
       Errors.fail_exit (-1) dloc "Unknown encoding '%s'" enc
   in
   let options = Arg.align
-    [ ( "-d"
+    [ ( "-l"
+      , Arg.Unit (fun () -> (set_debug_mode "a"))
+      , " Active the debug flag specific to dkmeta")
+    ; ( "-d"
       , Arg.String set_debug_mode
       , " flags enables debugging for all given flags" )
     ; ( "-q"
@@ -103,7 +108,7 @@ let _ =
       match !run_on_stdin with
       | None   -> ()
       | Some m ->
-        let md = Env.init m in
+        let md = E.init m in
         let mk_entry e =
           Format.printf "%a@." Pp.print_entry (Dkmeta.mk_entry cfg md e)
         in
