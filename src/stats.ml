@@ -88,6 +88,7 @@ let logger = fun _ rn b a ->
 module R : Reduction.S =
 struct
   open Reduction
+  include Default
 
   let whnf_cfg = {default_cfg with target = Whnf; logger;}
 

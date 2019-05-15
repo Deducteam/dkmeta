@@ -435,7 +435,7 @@ let decode cfg term =
 
 let normalize cfg term =
   let red = red_cfg cfg in
-  Reduction.reduction red cfg.sg term
+  Reduction.Default.reduction red cfg.sg term
 
 
 let sg = ref (Signature.make "")
@@ -500,7 +500,7 @@ let mk_entry = fun cfg md entry ->
   let open Rule in
   match entry with
   | Decl(lc,id,st,ty) ->
-    log "%a" Basic.pp_ident id;
+    log "[NORMALIZE] %a" Basic.pp_ident id;
     (* Signature.add_declaration !sg lc id st ty; *)
     begin
       match cfg.meta_rules with
@@ -510,7 +510,7 @@ let mk_entry = fun cfg md entry ->
     let ty' = mk_term cfg ty in
     Decl(lc,id, st , ty')
   | Def(lc,id,opaque, Some ty,te) ->
-    log "%a" Basic.pp_ident id;
+    log "[NORMALIZE] %a" Basic.pp_ident id;
     let cst = Basic.mk_name md id in
     let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
     (*
