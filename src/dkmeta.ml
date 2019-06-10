@@ -361,11 +361,12 @@ struct
       Pattern(lc, name_of "app", Pattern(lc, name_of "coucou", [])::((Pattern(lc,name_of "sym",[Pattern(lc,n,[])])))::(encode_pattern sg ctx a)::[])
 *)
   let encode_rule = fun sg r ->
-    let _,r' = Typing.Default.typed_rule_of_rule_infos sg (Rule.to_rule_infos r) in
+    let r' = Rule.untyped_rule_of_rule_infos (Rule.to_rule_infos r) in
+    let _,r'' = Typing.Default.check_rule sg r' in
     let open Rule in
     { r with
-      pat = encode_pattern sg r'.ctx r.pat;
-      rhs = encode_term sg r'.ctx r.rhs
+      pat = encode_pattern sg r''.ctx r.pat;
+      rhs = encode_term sg r''.ctx r.rhs
     }
 
   let encode_term ?(sg=Signature.make "") ?(ctx=[]) t = encode_term sg ctx t

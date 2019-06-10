@@ -1,4 +1,5 @@
 module B = Basic
+module Printer = Pp.Default
 
 type flag =
   | Md
@@ -43,16 +44,16 @@ let register_flags : Rule.rule_name -> Term.term -> unit = fun rn t ->
   Hashtbl.add flags rn (meta_flag_of_term t)
 
 let print_id = fun fmt id ->
-  Format.fprintf fmt "id:%a" Pp.print_ident id
+  Format.fprintf fmt "id:%a" Printer.print_ident id
 
 let print_md = fun fmt md ->
-  Format.fprintf fmt "md:%a" Pp.print_mident md
+  Format.fprintf fmt "md:%a" Printer.print_mident md
 
 let print_matchee = fun fmt t ->
-  Format.fprintf fmt "b:%a" Pp.print_term (Lazy.force t)
+  Format.fprintf fmt "b:%a" Printer.print_term (Lazy.force t)
 
 let print_reduced = fun fmt t ->
-  Format.fprintf fmt "a:%a" Pp.print_term (Lazy.force t)
+  Format.fprintf fmt "a:%a" Printer.print_term (Lazy.force t)
 
 let print_loc = fun fmt t ->
   Format.fprintf fmt "l:%a" Basic.pp_loc t
@@ -127,7 +128,7 @@ let _check_arity (r:Rule.rule_infos) : unit =
   let check l id n k nargs =
     let expected_args = r.arity.(n-k) in
     if nargs < expected_args
-    then raise (Env.EnvError (l, Env.NotEnoughArguments (id,n,nargs,expected_args))) in
+    then raise (Env.EnvError (None,l, Env.NotEnoughArguments (id,n,nargs,expected_args))) in
   let rec aux k = function
     | Kind | Type _ | Const _ -> ()
     | DB (l,id,n) ->
@@ -165,7 +166,7 @@ let mk_entry md =
     in
     begin
       match ty with
-      | Kind -> raise (Env.EnvError (lc, Env.KindLevelDefinition id))
+      | Kind -> raise (Env.EnvError (Some md, lc, Env.KindLevelDefinition id))
       | _ ->
         if opaque then Signature.add_declaration !sg lc id Signature.Static ty
         else

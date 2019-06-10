@@ -1,9 +1,11 @@
 open Basic
 open Dkmeta
 
-module E = Env.Default
+module E = Env.Make(Reduction.Default)
+module Printer = E.Printer
+module Errors = Errors.Make(E)
 
-let _ = Signature.unsafe := true
+let _ = Signature.fail_on_symbol_not_found := true
 
 let meta_files : string list ref = ref []
 let add_meta_file s =
@@ -21,7 +23,7 @@ let run_on_file cfg file =
   let entries = Parser.Parse_channel.parse md input in
   Dkmeta.init file;
   let entries' = List.map (Dkmeta.mk_entry cfg md) entries in
-  List.iter (Format.printf "%a@." Pp.print_entry) entries';
+  List.iter (Format.printf "%a@." Printer.print_entry) entries';
   Errors.success "File '%s' was successfully metaified." file;
   close_in input
 
@@ -47,7 +49,7 @@ let _ =
     else if enc = "app" then
       encoding := Some (module Dkmeta.APP)
     else
-      Errors.fail_exit (-1) dloc "Unknown encoding '%s'" enc
+      Errors.fail_exit (-1) "-1" None (Some dloc) "Unknown encoding '%s'" enc
   in
   let options = Arg.align
     [ ( "-l"
@@ -110,13 +112,13 @@ let _ =
       | Some m ->
         let md = E.init m in
         let mk_entry e =
-          Format.printf "%a@." Pp.print_entry (Dkmeta.mk_entry cfg md e)
+          Format.printf "%a@." Printer.print_entry (Dkmeta.mk_entry cfg md e)
         in
         Parser.Parse_channel.handle md mk_entry stdin;
         Errors.success "Standard input was successfully checked.@."
   with
-  | Signature.SignatureError sg -> Errors.fail_env_error dloc (Env.EnvErrorSignature sg)
-  | Env.EnvError(l,e) -> Errors.fail_env_error l e
-  | Typing.TypingError t -> Errors.fail_env_error Basic.dloc (Env.EnvErrorType t)
+  | Signature.SignatureError sg -> Errors.fail_env_error(None,Basic.dloc, Env.EnvErrorSignature sg)
+  | Env.EnvError(md,l,e) -> Errors.fail_env_error(md,l,e)
+  | Typing.TypingError t -> Errors.fail_env_error(None,Basic.dloc, Env.EnvErrorType t)
   | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
   | Exit                 -> exit 3
