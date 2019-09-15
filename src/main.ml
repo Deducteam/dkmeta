@@ -5,7 +5,7 @@ module E = Env.Make(Reduction.Default)
 module Printer = E.Printer
 module Errors = Errors.Make(E)
 
-let _ = Signature.fail_on_symbol_not_found := true
+let _ = Signature.fail_on_symbol_not_found := false
 
 let meta_files : string list ref = ref []
 let add_meta_file s =
