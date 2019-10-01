@@ -1,3 +1,9 @@
+open Kernel
+open Api
+open Parsers
+
+let version = "0.1"
+
 module type Encoding =
 sig
   val md : Basic.mident
@@ -15,34 +21,31 @@ sig
   val encode_rule : ?sg:Signature.t ->  'a Term.context Rule.rule -> 'a Term.context Rule.rule
 end
 
-let version = "0.1"
-
-let rule_name_compare r r' =
-  let open Rule in
-  match r,r' with
-  | Beta, Beta -> 0
-  | Gamma(b,n), Gamma(b',n') when b = b' -> compare n n'
-  | Delta n, Delta n' -> compare n n'
-  | _ -> -1
-
-module RNS = Set.Make(struct type t = Rule.rule_name let compare = rule_name_compare end)
+module RNS = Set.Make(struct type t = Rule.rule_name let compare = compare end)
 
 type cfg = {
   mutable meta_rules  : RNS.t option;
+  (* Set of meta_rules used to normalize *)
   beta                : bool;
+  (* Allows beta doing normalization *)
   encoding            : (module Encoding) option;
-  sg                  : Signature.t
+  (* Encoding specify a quoting mechanism *)
+  env                 : Env.t
+  (* The current environment (if the encoding needs type checking *)
 }
 
 let default_config =
   {
     meta_rules = None;
-    beta = true;
-    encoding = None;
-    sg = Signature.make ""
+    beta       = true;
+    encoding   = None;
+    env        = Env.init (Parser.input_from_string (Basic.mk_mident "") "")
   }
 
-let red_cfg : cfg -> Reduction.red_cfg = fun cfg ->
+
+(* A dkmeta configuration to a reduction configuration *)
+let red_cfg : cfg -> Reduction.red_cfg =
+  fun cfg ->
   let open Reduction in
   { default_cfg with
     beta = cfg.beta;
@@ -69,7 +72,7 @@ struct
     List.map mk_decl ["prod"]
 
   let signature =
-    let sg = Signature.make "prod" in
+    let sg = Signature.make md Files.find_object_file in
     let mk_decl id =
       Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
     in
@@ -95,20 +98,20 @@ struct
 
   and encode_DB lc x n = mk_DB lc x n
 
-  and encode_Const lc name = mk_Const dloc name
+  and encode_Const _ name = mk_Const dloc name
 
-  and encode_Lam lc x mty te =
+  and encode_Lam _ x mty te =
     let mty' = match mty with None -> None | Some ty -> Some (encode_term  ty) in
     mk_Lam dloc x mty' (encode_term  te)
 
   and encode_App f a args =
     mk_App2 (encode_term  f) (List.map (encode_term ) (a::args))
 
-  and encode_Pi lc x a b =
+  and encode_Pi _ x a b =
     mk_App (const_of "prod") (encode_term a) [mk_Lam dloc x (Some (encode_term  a)) (encode_term  b)]
 
   (* Using typed context here does not make sense *)
-  let rec encode_pattern  pattern : Rule.pattern = pattern
+  let encode_pattern  pattern : Rule.pattern = pattern
 
   let encode_rule (r:'a Rule.rule) =
     let open Rule in
@@ -123,9 +126,9 @@ struct
 
   let rec decode_term t =
     match t with
-    | Kind -> assert false
-    | Pi(lc,x,a,b) -> assert false
-    | App(f,a,args) -> decode_App f a args
+    | Kind             -> assert false
+    | Pi _             -> assert false
+    | App(f,a,args)    -> decode_App f a args
     | Lam(lc,x,mty,te) -> decode_Lam lc x mty te
     | Type _
     | DB _
@@ -137,7 +140,7 @@ struct
 
   and decode_App f a args =
     match f with
-    | Const(lc,name) ->
+    | Const(_,name) ->
       begin
         if name_eq name (name_of "prod") then
           match args with
@@ -147,8 +150,6 @@ struct
             mk_App (decode_term f) (decode_term a) (List.map decode_term args)
       end
     | _ -> mk_App (decode_term f) (decode_term a) (List.map decode_term args)
-
-  and decode_Pi lc x a b = assert false
 
 end
 
@@ -166,7 +167,7 @@ struct
     List.map mk_decl ["ty"; "var";"sym";"lam";"app";"prod"]
 
   let signature =
-    let sg = Signature.make "lf" in
+    let sg = Signature.make md Files.find_object_file in
     let mk_decl id =
       Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
     in
@@ -189,22 +190,22 @@ struct
     | App(f,a,args) -> encode_App f a args
     | Pi(lc,x,a,b) -> encode_Pi lc x a b
 
-  and encode_type lc = (const_of "ty")
+  and encode_type _ = (const_of "ty")
 
   and encode_DB lc x n =
     mk_App (const_of "var") (mk_DB lc x n) []
 
-  and encode_Const lc name =
+  and encode_Const _ name =
     mk_App (const_of "sym") (mk_Const dloc name) []
 
-  and encode_Lam lc x mty te =
+  and encode_Lam _ x mty te =
     let mty' = match mty with None -> None | Some ty -> Some (encode_term  ty) in
     mk_App (const_of "lam") (mk_Lam dloc x mty' (encode_term  te)) []
 
   and encode_App f a args =
     mk_App (const_of "app") (encode_term  f) (List.map (encode_term ) (a::args))
 
-  and encode_Pi lc x a b =
+  and encode_Pi _ x a b =
     mk_App (const_of "prod") (mk_Lam dloc x (Some (encode_term  a)) (encode_term  b)) []
 
 
@@ -233,13 +234,13 @@ struct
 
   let rec decode_term t =
     match t with
-    | Kind -> assert false
-    | Type(lc) -> assert false
-    | DB(lc,x,n) -> decode_DB lc x n
-    | Const(lc,name) -> decode_Const lc name
+    | Kind             -> assert false
+    | Type _           -> assert false
+    | DB(lc,x,n)       -> decode_DB lc x n
+    | Const(lc,name)   -> decode_Const lc name
     | Lam(lc,x,mty,te) -> decode_Lam lc x mty te
-    | App(f,a,args) -> decode_App f a args
-    | Pi(lc,x,a,b) -> decode_Pi lc x a b
+    | App(f,a,args)    -> decode_App f a args
+    | Pi(lc,x,a,b)     -> decode_Pi lc x a b
 
   and decode_DB lc x n = mk_DB lc x n
 
@@ -252,7 +253,7 @@ struct
 
   and decode_App f a args =
     match f with
-    | Const(lc,name) ->
+    | Const(_,name) ->
       if name_eq name (name_of "prod") then
         match a with
         | Lam(_,x,Some a, b) -> mk_Pi dloc x (decode_term a) (decode_term b)
@@ -270,7 +271,7 @@ struct
 
     | _ -> decode_App (decode_term f) (decode_term a) (List.map decode_term args)
 
-  and decode_Pi lc x a b = assert false
+  and decode_Pi _ _ _ _ = assert false
 end
 
 module APP =
@@ -287,7 +288,7 @@ struct
     List.map mk_decl ["ty"; "var";"sym";"lam";"app";"prod"]
 
   let signature =
-    let sg = Signature.make "app" in
+    let sg = Signature.make md Files.find_object_file in
     let mk_decl id =
       Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
     in
@@ -307,19 +308,19 @@ struct
     | DB(lc,x,n) -> encode_DB sg ctx lc x n
     | Const(lc, name) -> encode_Const sg ctx lc name
     | Lam(lc,x,Some ty,te) -> encode_Lam sg ctx lc x ty te
-    | Lam(lc,x, ty,te) -> assert false
+    | Lam _ -> assert false
     | App(f,a,args) -> encode_App sg ctx f a args
     | Pi(lc,x,a,b) -> encode_Pi sg ctx lc x a b
 
-  and encode_type sg ctx lc = (const_of "ty")
+  and encode_type _ _ _ = (const_of "ty")
 
-  and encode_DB sg ctx lc x n =
+  and encode_DB _ _ lc x n =
     mk_App (const_of "var") (mk_DB lc x n) []
 
-  and encode_Const sg ctx lc name =
+  and encode_Const _ _ _ name =
     mk_App (const_of "sym") (mk_Const dloc name) []
 
-  and encode_Lam sg ctx lc x ty te =
+  and encode_Lam sg ctx _ x ty te =
     let ctx' = (Basic.dloc, x, ty)::ctx in
     mk_App (const_of "lam") (mk_Lam dloc x (Some (encode_term sg ctx ty)) (encode_term sg ctx' te)) []
 
@@ -327,8 +328,8 @@ struct
     encode_app2 sg ctx f (a::args)
 
   and encode_app2 sg ctx f args =
-    let rec aux f f' a =
-      let tyf = Typing.Default.infer sg ctx f in
+    let aux f f' a =
+      let tyf  = Typing.Default.infer sg ctx f in
       let tyf' =
         begin
           match tyf with
@@ -340,12 +341,12 @@ struct
     in
     snd @@ List.fold_left (fun (f,f') a -> aux f f' a) (f,encode_term sg ctx f) args
 
-  and encode_Pi sg ctx lc x a b =
+  and encode_Pi sg ctx _ x a b =
     let ctx' = (Basic.dloc, x, a)::ctx in
     mk_App (const_of "prod") (mk_Lam dloc x (Some (encode_term sg ctx a)) (encode_term sg ctx' b)) []
 
   (* FIXME: complete this function *)
-  let rec encode_pattern = fun sg ctx pattern -> pattern
+  let encode_pattern = fun _ _ pattern -> pattern
     (*
   let open Rule in
 
@@ -369,14 +370,17 @@ struct
       rhs = encode_term sg r''.ctx r.rhs
     }
 
-  let encode_term ?(sg=Signature.make "") ?(ctx=[]) t = encode_term sg ctx t
+  let fake_sig () =
+    Signature.make (Basic.mk_mident "") Files.find_object_file
 
-  let encode_rule ?(sg=Signature.make "") r = encode_rule sg r
+  let encode_term ?(sg=fake_sig ()) ?(ctx=[]) t = encode_term sg ctx t
+
+  let encode_rule ?(sg=fake_sig ()) r = encode_rule sg r
 
   let rec decode_term t =
     match t with
-    | Kind -> assert false
-    | Type(lc) -> assert false
+    | Kind   -> assert false
+    | Type _ -> assert false
     | DB(lc,x,n) -> decode_DB lc x n
     | Const(lc,name) -> decode_Const lc name
     | Lam(lc,x,mty,te) -> decode_Lam lc x mty te
@@ -394,7 +398,7 @@ struct
 
   and decode_App f a args =
     match f with
-    | Const(lc,name) ->
+    | Const(_,name) ->
       if name_eq name (name_of "prod") then
         match a with
         | Lam(_,x,Some a, b) -> mk_Pi dloc x (decode_term a) (decode_term b)
@@ -417,7 +421,7 @@ struct
 
     | _ -> decode_App (decode_term f) (decode_term a) (List.map decode_term args)
 
-  and decode_Pi lc x a b = assert false
+  and decode_Pi _ _ _ _ = assert false
 end
 
 let encode sg cfg term =
@@ -436,13 +440,14 @@ let decode cfg term =
 
 let normalize cfg term =
   let red = red_cfg cfg in
-  Reduction.Default.reduction red cfg.sg term
+  let sg = Env.get_signature cfg.env in
+  Reduction.Default.reduction red sg term
 
 
-let sg = ref (Signature.make "")
+let sg = ref (Signature.make (Basic.mk_mident "") Files.find_object_file)
 
 let init f =
-  sg := Signature.make f
+  sg := Signature.make f Files.find_object_file
 
 let mk_term cfg term =
   (* Format.eprintf "b:%a@." Pp.print_term term; *)
@@ -499,13 +504,14 @@ let log fmt = D.debug D_meta (bmag fmt)
 let mk_entry = fun cfg md entry ->
   let open Entry in
   let open Rule in
+  let sg = Env.get_signature cfg.env in
   match entry with
   | Decl(lc,id,st,ty) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
     (* Signature.add_declaration !sg lc id st ty; *)
     begin
       match cfg.meta_rules with
-      | None -> Signature.add_declaration cfg.sg lc id Signature.Definable ty;
+      | None -> Signature.add_declaration sg lc id Signature.Definable ty;
       | Some _ -> ()
     end;
     let ty' = mk_term cfg ty in
@@ -520,14 +526,14 @@ let mk_entry = fun cfg md entry ->
     begin
       match cfg.meta_rules with
       | None ->
-        Signature.add_declaration cfg.sg lc id Signature.Definable ty;
-        Signature.add_rules cfg.sg (List.map Rule.to_rule_infos [rule])
+        Signature.add_declaration sg lc id Signature.Definable ty;
+        Signature.add_rules sg (List.map Rule.to_rule_infos [rule])
       | _ -> ()
     end;
     let ty' = mk_term cfg ty in
     let te' = mk_term cfg te in
     Def(lc,id,opaque,Some ty', te')
-  | Def(lc,id,opaque, None,te) ->
+  | Def _ ->
     failwith "type is missing and Dedukti is buggy so no location"
   | Rules(lc,rs) ->
     (* Signature.add_rules !sg (List.map Rule.to_rule_infos rs); *)
@@ -535,14 +541,11 @@ let mk_entry = fun cfg md entry ->
     begin
       match cfg.meta_rules with (* If None, everything is meta *)
       | None ->
-        Signature.add_rules cfg.sg (List.map Rule.to_rule_infos rs')
+        Signature.add_rules sg (List.map Rule.to_rule_infos rs')
       | _ -> ()
     end;
     Rules(lc,rs')
   | _ -> entry
-
-let dummy_name = ""
-let dummy_signature () = Signature.make dummy_name
 
 let add_rule sg r =
   Signature.add_rules sg [(Rule.to_rule_infos r)]
@@ -552,20 +555,42 @@ let add_rules sg rs = List.iter (add_rule sg) rs
 
 let meta_of_rules : Rule.untyped_rule list -> cfg -> cfg = fun rules cfg ->
   let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
-  add_rules cfg.sg rules;
+  let sg = Env.get_signature cfg.env in
+  add_rules sg rules;
   match cfg.meta_rules with
   | None ->
     { cfg with meta_rules = Some (RNS.of_list rule_names)}
   | Some mrules ->
     { cfg with meta_rules = Some (RNS.union (RNS.of_list (rule_names)) mrules) }
 
-let meta_of_file : string -> ?md:Basic.mident -> cfg -> cfg =
-  fun file ?md:(md=Basic.mk_mident file) cfg ->
-  let ic = open_in file in
-  let mk_entry = function
-    | Entry.Rules(_,rs) -> rs
-    | _ -> []
+
+module MetaConfiguration : Processor.S with type t = Rule.untyped_rule list =
+struct
+
+  type t = Rule.untyped_rule list
+
+  let rules = ref []
+  let handle_entry _ = function
+    | Entry.Rules(_,rs) -> rules := rs::!rules
+    | _ -> ()
+
+  let get_data () = List.flatten !rules
+
+end
+
+let meta_of_files ?cfg:(cfg=default_config) files =
+  Processor.process_files files  meta_of_rules cfg (module MetaConfiguration)
+
+let make_meta_processor cfg post_processing =
+  let module Meta =
+  struct
+    type t = unit
+
+    let handle_entry env entry =
+      let md = Env.get_name env in
+      post_processing (mk_entry cfg md entry)
+
+    let get_data () = ()
+  end
   in
-  let entries = Parser.Parse_channel.parse md ic in
-  let rules =  List.flatten @@ List.fold_left (fun r e -> (mk_entry e)::r) [] entries in
-  meta_of_rules rules cfg
+  (module Meta : Processor.S with type t = unit)

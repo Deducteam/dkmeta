@@ -1,31 +1,18 @@
+open Kernel
 open Basic
-open Dkmeta
+open Api
 
-module E = Env.Make(Reduction.Default)
-module Printer = E.Printer
-module Errors = Errors.Make(E)
-
+(* By default, we don't wont to fail if a symbol is not found in a signature. This is to simplify the use of dkmeta and to add in the signature only the definable meta symbols. *)
 let _ = Signature.fail_on_symbol_not_found := false
 
 let meta_files : string list ref = ref []
+
 let add_meta_file s =
   meta_files := s::!meta_files
 
 let meta_mds : Basic.mident list ref = ref []
 let add_meta_md md =
   meta_mds := md::!meta_mds
-
-let run_on_file cfg file =
-  let import md = E.import Basic.dloc md in
-  let input = open_in file in
-  let md = E.init file in
-  List.iter import !meta_mds;
-  let entries = Parser.Parse_channel.parse md input in
-  Dkmeta.init file;
-  let entries' = List.map (Dkmeta.mk_entry cfg md) entries in
-  List.iter (Format.printf "%a@." Printer.print_entry) entries';
-  Errors.success "File '%s' was successfully metaified." file;
-  close_in input
 
 let set_debug_mode opts =
   try  Env.set_debug_mode opts
@@ -49,7 +36,7 @@ let _ =
     else if enc = "app" then
       encoding := Some (module Dkmeta.APP)
     else
-      Errors.fail_exit (-1) "-1" None (Some dloc) "Unknown encoding '%s'" enc
+      Errors.fail_exit ~file:"" ~code:"-1" (Some dloc) "Unknown encoding '%s'" enc
   in
   let options = Arg.align
     [ ( "-l"
@@ -80,7 +67,7 @@ let _ =
       , Arg.Unit (fun () -> stats := true)
       , " Print statistics" )
     ; ( "-I"
-      , Arg.String Basic.add_path
+      , Arg.String Files.add_path
       , " DIR Add the directory DIR to the load path" )]
   in
   let usage = "Usage: " ^ Sys.argv.(0) ^ " [OPTION]... [FILE]...\n" in
@@ -94,31 +81,39 @@ let _ =
     { default_config with
       beta = !beta;
       encoding = !encoding;
-      sg = Signature.make "meta" (* the name is not relevant here *)
+      env = Env.init (Parsers.Parser.input_from_string (Basic.mk_mident "meta") "")
     })
   in
-  try
-    if !stats then
-      begin
-        List.iter Stats.run_on_meta_file !meta_files;
-        List.iter Stats.run_on_file files
-      end
-    else
-      let cfg = List.fold_left (fun cfg f -> Dkmeta.meta_of_file f cfg) cfg !meta_files in
-      Errors.success "Meta files parsed.@.";
-      List.iter (run_on_file cfg) files;
-      match !run_on_stdin with
-      | None   -> ()
-      | Some m ->
-        let md = E.init m in
-        let mk_entry e =
-          Format.printf "%a@." Printer.print_entry (Dkmeta.mk_entry cfg md e)
-        in
-        Parser.Parse_channel.handle md mk_entry stdin;
-        Errors.success "Standard input was successfully checked.@."
-  with
-  | Signature.SignatureError sg -> Errors.fail_env_error(None,Basic.dloc, Env.EnvErrorSignature sg)
-  | Env.EnvError(md,l,e) -> Errors.fail_env_error(md,l,e)
-  | Typing.TypingError t -> Errors.fail_env_error(None,Basic.dloc, Env.EnvErrorType t)
-  | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
-  | Exit                 -> exit 3
+  if !stats then
+    begin
+      List.iter Stats.run_on_meta_file !meta_files;
+      List.iter Stats.run_on_file files
+    end
+  else
+    let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
+    Errors.success "Meta files parsed.@.";
+    let post_processing entry = Format.printf "%a@." Pp.Default.print_entry entry in
+    let hook_after env exn =
+      match exn with
+      | None ->Errors.success
+                 (Format.asprintf "File '%s' was successfully metaified." (Env.get_filename env))
+      | Some(env,lc,exn) -> Env.fail_env_error env lc exn
+    in
+    Processor.handle_files files ~hook_after (Dkmeta.make_meta_processor cfg post_processing);
+    match !run_on_stdin with
+    | None   -> ()
+    | Some m ->
+      let input = Parsers.Parser.input_from_stdin (Basic.mk_mident m) in
+      Api.Processor.handle_input input (Dkmeta.make_meta_processor cfg post_processing)
+
+(* let run_on_file cfg file =
+ *   let import md = Env.import Basic.dloc md in
+ *   let input = open_in file in
+ *   let md = E.init file in
+ *   List.iter import !meta_mds;
+ *   let entries = Parser.Parse_channel.parse md input in
+ *   Dkmeta.init file;
+ *   let entries' = List.map (Dkmeta.mk_entry cfg md) entries in
+ *   List.iter (Format.printf "%a@." Printer.print_entry) entries';
+ *   Errors.success "File '%s' was successfully metaified." file;
+ *   close_in input *)
