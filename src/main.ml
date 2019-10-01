@@ -90,21 +90,23 @@ let _ =
       List.iter Stats.run_on_file files
     end
   else
-    let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
-    Errors.success "Meta files parsed.@.";
-    let post_processing entry = Format.printf "%a@." Pp.Default.print_entry entry in
-    let hook_after env exn =
-      match exn with
-      | None ->Errors.success
-                 (Format.asprintf "File '%s' was successfully metaified." (Env.get_filename env))
-      | Some(env,lc,exn) -> Env.fail_env_error env lc exn
-    in
-    Processor.handle_files files ~hook_after (Dkmeta.make_meta_processor cfg post_processing);
-    match !run_on_stdin with
-    | None   -> ()
-    | Some m ->
-      let input = Parsers.Parser.input_from_stdin (Basic.mk_mident m) in
-      Api.Processor.handle_input input (Dkmeta.make_meta_processor cfg post_processing)
+    begin
+      let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
+      Errors.success "Meta files parsed.@.";
+      let post_processing entry = Format.printf "%a@." Pp.Default.print_entry entry in
+      let hook_after env exn =
+        match exn with
+        | None ->Errors.success
+                   (Format.asprintf "File '%s' was successfully metaified." (Env.get_filename env))
+        | Some(env,lc,exn) -> Env.fail_env_error env lc exn
+      in
+      Processor.handle_files files ~hook_after (Dkmeta.make_meta_processor cfg post_processing);
+      match !run_on_stdin with
+      | None   -> ()
+      | Some m ->
+        let input = Parsers.Parser.input_from_stdin (Basic.mk_mident m) in
+        Api.Processor.handle_input input (Dkmeta.make_meta_processor cfg post_processing)
+    end
 
 (* let run_on_file cfg file =
  *   let import md = Env.import Basic.dloc md in

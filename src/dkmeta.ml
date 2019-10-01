@@ -444,14 +444,17 @@ let normalize cfg term =
   Reduction.Default.reduction red sg term
 
 
+
+
 let sg = ref (Signature.make (Basic.mk_mident "") Files.find_object_file)
 
 let init f =
   sg := Signature.make f Files.find_object_file
 
-let mk_term cfg term =
+let mk_term env cfg term =
   (* Format.eprintf "b:%a@." Pp.print_term term; *)
-  let term' = encode !sg cfg term in
+  let sg    = Env.get_signature env in
+  let term' = encode sg cfg term in
   (* Format.eprintf "a:%a@." Pp.print_term term'; *)
   let term'' = normalize cfg term' in
   (* Format.eprintf "n:%a@." Pp.print_term term''; *)
@@ -476,13 +479,14 @@ let rec pattern_of_term = fun t ->
     Rule.Var(lc,x,n,[])
   | _ -> raise Not_a_pattern
 
-let mk_rule cfg (r: 'a Term.context Rule.rule) =
+let mk_rule env cfg (r: 'a Term.context Rule.rule) =
   let open Rule in
   match cfg.encoding with
   | None ->
     {r with rhs = normalize cfg r.rhs}
   | Some (module E:Encoding) ->
-    let r' = E.encode_rule ~sg:!sg r in
+    let sg = Env.get_signature env in
+    let r' = E.encode_rule ~sg r in
     let pat'  = pattern_of_term (E.decode_term (normalize cfg (Rule.pattern_to_term r'.pat))) in
     let rhs'  = normalize cfg r'.rhs in
     let rhs'' = decode cfg rhs' in
@@ -501,20 +505,16 @@ let bmag fmt = "\027[90m" ^^ fmt ^^ "\027[0m%!"
 
 let log fmt = D.debug D_meta (bmag fmt)
 
-let mk_entry = fun cfg md entry ->
+let mk_entry env = fun cfg entry ->
   let open Entry in
   let open Rule in
-  let sg = Env.get_signature cfg.env in
+  let sg = Env.get_signature env in
+  let md = Env.get_name env in
   match entry with
   | Decl(lc,id,st,ty) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
-    (* Signature.add_declaration !sg lc id st ty; *)
-    begin
-      match cfg.meta_rules with
-      | None -> Signature.add_declaration sg lc id Signature.Definable ty;
-      | Some _ -> ()
-    end;
-    let ty' = mk_term cfg ty in
+    Signature.add_declaration sg lc id st ty;
+    let ty' = mk_term env cfg ty in
     Decl(lc,id, st , ty')
   | Def(lc,id,opaque, Some ty,te) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
@@ -523,27 +523,17 @@ let mk_entry = fun cfg md entry ->
     (*
     Signature.add_declaration !sg lc id Signature.Definable ty;
       Signature.add_rules !sg (List.map Rule.to_rule_infos [rule]); *)
-    begin
-      match cfg.meta_rules with
-      | None ->
-        Signature.add_declaration sg lc id Signature.Definable ty;
-        Signature.add_rules sg (List.map Rule.to_rule_infos [rule])
-      | _ -> ()
-    end;
-    let ty' = mk_term cfg ty in
-    let te' = mk_term cfg te in
+    Signature.add_declaration sg lc id Signature.Definable ty;
+    Signature.add_rules sg (List.map Rule.to_rule_infos [rule]);
+    let ty' = mk_term env cfg ty in
+    let te' = mk_term env cfg te in
     Def(lc,id,opaque,Some ty', te')
   | Def _ ->
     failwith "type is missing and Dedukti is buggy so no location"
   | Rules(lc,rs) ->
     (* Signature.add_rules !sg (List.map Rule.to_rule_infos rs); *)
-    let rs' = List.map (mk_rule cfg) rs in
-    begin
-      match cfg.meta_rules with (* If None, everything is meta *)
-      | None ->
-        Signature.add_rules sg (List.map Rule.to_rule_infos rs')
-      | _ -> ()
-    end;
+    let rs' = List.map (mk_rule env cfg) rs in
+    Signature.add_rules sg (List.map Rule.to_rule_infos rs');
     Rules(lc,rs')
   | _ -> entry
 
@@ -586,9 +576,7 @@ let make_meta_processor cfg post_processing =
   struct
     type t = unit
 
-    let handle_entry env entry =
-      let md = Env.get_name env in
-      post_processing (mk_entry cfg md entry)
+    let handle_entry env entry = post_processing (mk_entry env cfg entry)
 
     let get_data () = ()
   end
