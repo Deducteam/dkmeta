@@ -513,8 +513,8 @@ let mk_entry env = fun cfg entry ->
   match entry with
   | Decl(lc,id,st,ty) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
-    Signature.add_declaration sg lc id st ty;
     let ty' = mk_term env cfg ty in
+    Signature.add_declaration sg lc id st ty';
     Decl(lc,id, st , ty')
   | Def(lc,id,opaque, Some ty,te) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
@@ -523,10 +523,10 @@ let mk_entry env = fun cfg entry ->
     (*
     Signature.add_declaration !sg lc id Signature.Definable ty;
       Signature.add_rules !sg (List.map Rule.to_rule_infos [rule]); *)
-    Signature.add_declaration sg lc id Signature.Definable ty;
-    Signature.add_rules sg (List.map Rule.to_rule_infos [rule]);
     let ty' = mk_term env cfg ty in
     let te' = mk_term env cfg te in
+    Signature.add_declaration sg lc id Signature.Definable ty';
+    Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te'}]);
     Def(lc,id,opaque,Some ty', te')
   | Def _ ->
     failwith "type is missing and Dedukti is buggy so no location"
