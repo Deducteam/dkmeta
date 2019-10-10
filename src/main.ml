@@ -54,6 +54,9 @@ let _ =
     ; ("--encoding"
       , Arg.String set_encoding
       , " Encoding the Dedukti file.")
+    ; ("--register-before"
+      , Arg.Unit (fun () -> Dkmeta.set_register_before true)
+      , " With a typed encoding, entries are registered before they are metaified")
     ; ("--switch-beta-off"
       , Arg.Unit switch_beta_off,
       " switch off beta while normalizing terms")
@@ -93,7 +96,9 @@ let _ =
     begin
       let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
       Errors.success "Meta files parsed.@.";
-      let post_processing entry = Format.printf "%a@." Pp.Default.print_entry entry in
+      let post_processing env entry =
+        let (module Printer) = Env.get_printer env in
+        Format.printf "%a" Printer.print_entry entry in
       let hook_after env exn =
         match exn with
         | None ->Errors.success

@@ -4,6 +4,11 @@ open Parsers
 
 let version = "0.1"
 
+let register_before = ref false
+
+let set_register_before b =
+  register_before := b
+
 module type Encoding =
 sig
   val md : Basic.mident
@@ -69,14 +74,14 @@ struct
     let mk_decl id =
       Entry.Decl(dloc,mk_ident id, Signature.Definable,mk_Type dloc)
     in
-    List.map mk_decl ["prod"]
+    List.map mk_decl ["ty"; "prod"]
 
   let signature =
     let sg = Signature.make md Files.find_object_file in
     let mk_decl id =
       Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
     in
-    List.iter mk_decl ["prod"]; sg
+    List.iter mk_decl ["ty"; "prod"]; sg
 
   let safe = false
 
@@ -94,7 +99,7 @@ struct
     | App(f,a,args) -> encode_App f a args
     | Pi(lc,x,a,b) -> encode_Pi lc x a b
 
-  and encode_type lc = mk_Type lc
+  and encode_type lc = mk_Const lc (name_of "ty")
 
   and encode_DB lc x n = mk_DB lc x n
 
@@ -130,9 +135,15 @@ struct
     | Pi _             -> assert false
     | App(f,a,args)    -> decode_App f a args
     | Lam(lc,x,mty,te) -> decode_Lam lc x mty te
+    | Const(lc, name)  -> decode_Const lc name
     | Type _
-    | DB _
-    | Const _ -> t
+    | DB   _           -> t
+
+  and decode_Const lc name =
+    if name_eq name (name_of "ty") then
+      mk_Type lc
+    else
+      mk_Const lc name
 
   and decode_Lam lc x mty te =
     let mty' = match mty with None -> None | Some mty -> Some (decode_term mty) in
@@ -206,7 +217,7 @@ struct
     mk_App (const_of "app") (encode_term  f) (List.map (encode_term ) (a::args))
 
   and encode_Pi _ x a b =
-    mk_App (const_of "prod") (mk_Lam dloc x (Some (encode_term  a)) (encode_term  b)) []
+    mk_App (const_of "prod") (encode_term a) [mk_Lam dloc x None (encode_term  b)]
 
 
   (* Using typed context here does not make sense *)
@@ -255,8 +266,8 @@ struct
     match f with
     | Const(_,name) ->
       if name_eq name (name_of "prod") then
-        match a with
-        | Lam(_,x,Some a, b) -> mk_Pi dloc x (decode_term a) (decode_term b)
+        match a,args with
+        | a,[Lam(_,x, None, b)] -> mk_Pi dloc x (decode_term a) (decode_term b)
         | _ -> assert false
       else if name_eq name (name_of "sym") then
         decode_term a
@@ -451,7 +462,7 @@ let sg = ref (Signature.make (Basic.mk_mident "") Files.find_object_file)
 let init f =
   sg := Signature.make f Files.find_object_file
 
-let mk_term env cfg term =
+let mk_term cfg ?(env=cfg.env) term =
   (* Format.eprintf "b:%a@." Pp.print_term term; *)
   let sg    = Env.get_signature env in
   let term' = encode sg cfg term in
@@ -513,8 +524,11 @@ let mk_entry env = fun cfg entry ->
   match entry with
   | Decl(lc,id,st,ty) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
-    let ty' = mk_term env cfg ty in
-    Signature.add_declaration sg lc id st ty';
+    let ty' = mk_term cfg ~env ty in
+    if !register_before then
+      Signature.add_declaration sg lc id st ty
+    else
+      Signature.add_declaration sg lc id st ty';
     Decl(lc,id, st , ty')
   | Def(lc,id,opaque, Some ty,te) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
@@ -523,17 +537,28 @@ let mk_entry env = fun cfg entry ->
     (*
     Signature.add_declaration !sg lc id Signature.Definable ty;
       Signature.add_rules !sg (List.map Rule.to_rule_infos [rule]); *)
-    let ty' = mk_term env cfg ty in
-    let te' = mk_term env cfg te in
-    Signature.add_declaration sg lc id Signature.Definable ty';
-    Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te'}]);
+    let ty' = mk_term cfg ~env ty in
+    let te' = mk_term cfg ~env te in
+    begin
+      if !register_before then
+        let _ = Signature.add_declaration sg lc id Signature.Definable ty in
+        Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te}])
+      else
+        let _ = Signature.add_declaration sg lc id Signature.Definable ty' in
+        Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te'}])
+    end;
     Def(lc,id,opaque,Some ty', te')
   | Def _ ->
     failwith "type is missing and Dedukti is buggy so no location"
   | Rules(lc,rs) ->
     (* Signature.add_rules !sg (List.map Rule.to_rule_infos rs); *)
     let rs' = List.map (mk_rule env cfg) rs in
-    Signature.add_rules sg (List.map Rule.to_rule_infos rs');
+    begin
+      if !register_before then
+        Signature.add_rules sg (List.map Rule.to_rule_infos rs)
+      else
+        Signature.add_rules sg (List.map Rule.to_rule_infos rs')
+    end;
     Rules(lc,rs')
   | _ -> entry
 
@@ -576,7 +601,7 @@ let make_meta_processor cfg post_processing =
   struct
     type t = unit
 
-    let handle_entry env entry = post_processing (mk_entry env cfg entry)
+    let handle_entry env entry = post_processing env (mk_entry env cfg entry)
 
     let get_data () = ()
   end
