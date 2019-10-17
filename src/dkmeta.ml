@@ -4,12 +4,7 @@ open Parsers
 
 let version = "0.1"
 
-let register_before = ref false
-
-let set_register_before b =
-  register_before := b
-
-module type Encoding =
+module type ENCODING =
 sig
   val md : Basic.mident
 
@@ -33,18 +28,27 @@ type cfg = {
   (* Set of meta_rules used to normalize *)
   beta                : bool;
   (* Allows beta doing normalization *)
-  encoding            : (module Encoding) option;
+  register_before     : bool;
+  (* entries are registered before they have been normalized *)
+  encode_meta_rules   : bool;
+  (* The encoding is used on the meta rules first except for products *)
+  encoding            : (module ENCODING) option;
   (* Encoding specify a quoting mechanism *)
+  decoding            : bool;
+  (* If false, the term is not decoded after normalization *)
   env                 : Env.t
   (* The current environment (if the encoding needs type checking *)
 }
 
 let default_config =
   {
-    meta_rules = None;
-    beta       = true;
-    encoding   = None;
-    env        = Env.init (Parser.input_from_string (Basic.mk_mident "") "")
+    meta_rules        = None;
+    beta              = true;
+    encoding          = None;
+    register_before   = true;
+    encode_meta_rules = false;
+    env               = Env.init (Parser.input_from_string (Basic.mk_mident "") "");
+    decoding          = true;
   }
 
 
@@ -214,7 +218,13 @@ struct
     mk_App (const_of "lam") (mk_Lam dloc x mty' (encode_term  te)) []
 
   and encode_App f a args =
-    mk_App (const_of "app") (encode_term  f) (List.map (encode_term ) (a::args))
+    let rec encode_app2 a args =
+      match a,args with
+      | _, [] -> assert false
+      | a,[x] -> mk_App (const_of "app") a [(encode_term x)]
+      | a, x::l -> encode_app2 (mk_App (const_of "app") a [(encode_term x)]) l
+    in
+    encode_app2 (encode_term f) (a::args)
 
   and encode_Pi _ x a b =
     mk_App (const_of "prod") (encode_term a) [mk_Lam dloc x None (encode_term  b)]
@@ -290,7 +300,7 @@ struct
   open Basic
   open Term
 
-  let md = mk_mident "app"
+  let md = mk_mident "ltyped"
 
   let entries () =
     let mk_decl id =
@@ -331,9 +341,11 @@ struct
   and encode_Const _ _ _ name =
     mk_App (const_of "sym") (mk_Const dloc name) []
 
-  and encode_Lam sg ctx _ x ty te =
-    let ctx' = (Basic.dloc, x, ty)::ctx in
-    mk_App (const_of "lam") (mk_Lam dloc x (Some (encode_term sg ctx ty)) (encode_term sg ctx' te)) []
+  and encode_Lam sg ctx lc x ty te =
+    let ctx' = (lc, x, ty)::ctx in
+    let tyf = Typing.Default.infer sg ctx (mk_Lam lc x (Some ty) te) in
+    let tyf' = PROD.encode_term tyf in
+    mk_App (const_of "lam") tyf'  [(mk_Lam dloc x (Some (encode_term sg ctx ty)) (encode_term sg ctx' te))]
 
   and encode_App sg ctx f a args =
     encode_app2 sg ctx f (a::args)
@@ -341,37 +353,32 @@ struct
   and encode_app2 sg ctx f args =
     let aux f f' a =
       let tyf  = Typing.Default.infer sg ctx f in
-      let tyf' =
-        begin
-          match tyf with
-          | Term.Pi _ -> PROD.encode_term tyf
-          | _ -> tyf
-        end
-      in
+      let tyf' = PROD.encode_term tyf in
       Term.mk_App2 f [a], mk_App (const_of "app") tyf' [f'; encode_term sg ctx a]
     in
     snd @@ List.fold_left (fun (f,f') a -> aux f f' a) (f,encode_term sg ctx f) args
 
-  and encode_Pi sg ctx _ x a b =
-    let ctx' = (Basic.dloc, x, a)::ctx in
+  and encode_Pi sg ctx lc x a b =
+    let ctx' = (lc, x, a)::ctx in
     mk_App (const_of "prod") (mk_Lam dloc x (Some (encode_term sg ctx a)) (encode_term sg ctx' b)) []
 
-  (* FIXME: complete this function *)
-  let encode_pattern = fun _ _ pattern -> pattern
-    (*
-  let open Rule in
-
+  let rec encode_pattern = fun sg ctx pattern ->
+    let open Rule in
+    let dummy = Var (Basic.dloc, mk_ident "_", 0, []) in
+    let mk_pat_app l r =
+      Pattern(Basic.dloc, name_of "app", [dummy;l; encode_pattern sg ctx r])
+    in
     match pattern with
     | Var(lc, id, n, ps) -> Var(lc,id,n, List.map (encode_pattern sg ctx) ps)
     | Brackets(term) -> Brackets(encode_term  sg ctx term)
-    | Lambda(lc, id, p) -> Pattern(lc,(name_of "lam"), [(Lambda(lc,id, encode_pattern sg ctx p))])
+    | Lambda(lc, id, p) -> Pattern(lc,(name_of "lam"), [dummy;(Lambda(lc,id, encode_pattern sg ctx p))])
     | Pattern(lc,n,[]) ->
       Pattern(lc,name_of "sym", [Pattern(lc,n,[])])
     | Pattern(lc,n, [a]) ->
-      Pattern(lc, name_of "app", Pattern(lc, name_of "coucou", [])::((Pattern(lc,name_of "sym",[Pattern(lc,n,[])])))::(encode_pattern sg ctx a)::[])
+      Pattern(lc, name_of "app", [dummy;(Pattern(lc,name_of "sym",[Pattern(lc,n,[])])); encode_pattern sg ctx a])
     | Pattern(lc,n,a::l) ->
-      Pattern(lc, name_of "app", Pattern(lc, name_of "coucou", [])::((Pattern(lc,name_of "sym",[Pattern(lc,n,[])])))::(encode_pattern sg ctx a)::[])
-*)
+      List.fold_left (fun p arg -> mk_pat_app p arg) (encode_pattern sg ctx (Pattern(lc,n,[]))) (a::l)
+
   let encode_rule = fun sg r ->
     let r' = Rule.untyped_rule_of_rule_infos (Rule.to_rule_infos r) in
     let _,r'' = Typing.Default.check_rule sg r' in
@@ -426,7 +433,10 @@ struct
           | _ -> assert false
         end
       else if name_eq name (name_of "lam") then
-        decode_term a
+        match args with
+        | [a] ->
+          decode_term a
+        | _ -> assert false
       else
         mk_App (decode_term f) (decode_term a) (List.map decode_term args)
 
@@ -438,7 +448,7 @@ end
 let encode sg cfg term =
   match cfg.encoding with
   | None -> term
-  | Some (module E:Encoding) ->
+  | Some (module E:ENCODING) ->
     if E.safe then
       E.encode_term ~sg term
     else
@@ -447,29 +457,22 @@ let encode sg cfg term =
 let decode cfg term =
   match cfg.encoding with
   | None -> term
-  | Some (module E:Encoding) -> E.decode_term term
+  | Some (module E:ENCODING) -> E.decode_term term
 
 let normalize cfg term =
   let red = red_cfg cfg in
   let sg = Env.get_signature cfg.env in
   Reduction.Default.reduction red sg term
 
-
-
-
-let sg = ref (Signature.make (Basic.mk_mident "") Files.find_object_file)
-
-let init f =
-  sg := Signature.make f Files.find_object_file
-
 let mk_term cfg ?(env=cfg.env) term =
   (* Format.eprintf "b:%a@." Pp.print_term term; *)
   let sg    = Env.get_signature env in
   let term' = encode sg cfg term in
-  (* Format.eprintf "a:%a@." Pp.print_term term'; *)
   let term'' = normalize cfg term' in
-  (* Format.eprintf "n:%a@." Pp.print_term term''; *)
-  decode cfg term''
+  if cfg.decoding then
+    decode cfg term''
+  else
+    term''
 
 exception Not_a_pattern
 
@@ -495,13 +498,14 @@ let mk_rule env cfg (r: 'a Term.context Rule.rule) =
   match cfg.encoding with
   | None ->
     {r with rhs = normalize cfg r.rhs}
-  | Some (module E:Encoding) ->
+  | Some (module E:ENCODING) ->
     let sg = Env.get_signature env in
     let r' = E.encode_rule ~sg r in
-    let pat'  = pattern_of_term (E.decode_term (normalize cfg (Rule.pattern_to_term r'.pat))) in
+    let pat'  = normalize cfg (Rule.pattern_to_term r'.pat) in
+    let pat'' = if cfg.decoding then pattern_of_term (E.decode_term pat') else pattern_of_term pat' in
     let rhs'  = normalize cfg r'.rhs in
-    let rhs'' = decode cfg rhs' in
-    {pat=pat';rhs=rhs'';ctx=r.ctx;name=r.name}
+    let rhs'' = if cfg.decoding then decode cfg rhs' else rhs' in
+    {pat=pat'';rhs=rhs'';ctx=r.ctx;name=r.name}
 
 (*
   let t = Rule.pattern_to_term pat in
@@ -525,36 +529,43 @@ let mk_entry env = fun cfg entry ->
   | Decl(lc,id,st,ty) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
     let ty' = mk_term cfg ~env ty in
-    if !register_before then
+    if cfg.register_before then
       Signature.add_declaration sg lc id st ty
     else
       Signature.add_declaration sg lc id st ty';
     Decl(lc,id, st , ty')
-  | Def(lc,id,opaque, Some ty,te) ->
+  | Def(lc,id,opaque, ty,te) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
     let cst = Basic.mk_name md id in
     let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
-    (*
-    Signature.add_declaration !sg lc id Signature.Definable ty;
-      Signature.add_rules !sg (List.map Rule.to_rule_infos [rule]); *)
-    let ty' = mk_term cfg ~env ty in
+    let safe_ty  =
+      match cfg.encoding, ty with
+      | Some (module E:ENCODING), None when E.safe -> Env.infer cfg.env te
+      | _                       , Some ty          -> ty
+      | _                       , _                -> Term.mk_Type (Basic.dloc)
+    in
+    let safe_ty' = mk_term cfg ~env safe_ty in
     let te' = mk_term cfg ~env te in
     begin
-      if !register_before then
-        let _ = Signature.add_declaration sg lc id Signature.Definable ty in
+      if cfg.register_before then
+        let _ = Signature.add_declaration sg lc id Signature.Definable safe_ty in
         Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te}])
       else
-        let _ = Signature.add_declaration sg lc id Signature.Definable ty' in
+        let _ = Signature.add_declaration sg lc id Signature.Definable safe_ty' in
         Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te'}])
     end;
-    Def(lc,id,opaque,Some ty', te')
-  | Def _ ->
-    failwith "type is missing and Dedukti is buggy so no location"
+    begin
+      match ty with
+      | None ->
+        Def(lc,id,opaque, None, te')
+      | Some _ ->
+        Def(lc,id,opaque, Some safe_ty', te')
+    end
   | Rules(lc,rs) ->
     (* Signature.add_rules !sg (List.map Rule.to_rule_infos rs); *)
     let rs' = List.map (mk_rule env cfg) rs in
     begin
-      if !register_before then
+      if cfg.register_before then
         Signature.add_rules sg (List.map Rule.to_rule_infos rs)
       else
         Signature.add_rules sg (List.map Rule.to_rule_infos rs')
@@ -587,6 +598,7 @@ struct
   let rules = ref []
   let handle_entry _ = function
     | Entry.Rules(_,rs) -> rules := rs::!rules
+    (* TODO: Handle definitions *)
     | _ -> ()
 
   let get_data () = List.flatten !rules
@@ -596,7 +608,7 @@ end
 let meta_of_files ?cfg:(cfg=default_config) files =
   Processor.process_files files  meta_of_rules cfg (module MetaConfiguration)
 
-let make_meta_processor cfg post_processing =
+let make_meta_processor cfg ~post_processing =
   let module Meta =
   struct
     type t = unit

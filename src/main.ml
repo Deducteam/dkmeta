@@ -27,17 +27,20 @@ let _ =
   let beta = ref true in
   let stats = ref false in
   let switch_beta_off () = beta := false in
-  let encoding : (module Dkmeta.Encoding) option ref = ref None in
+  let encoding : (module Dkmeta.ENCODING) option ref = ref None in
   let set_encoding enc =
     if enc = "lf" then
       encoding := Some (module Dkmeta.LF)
     else if enc = "prod" then
       encoding := Some (module Dkmeta.PROD)
-    else if enc = "app" then
+    else if enc = "ltyped" then
       encoding := Some (module Dkmeta.APP)
     else
       Errors.fail_exit ~file:"" ~code:"-1" (Some dloc) "Unknown encoding '%s'" enc
   in
+  let register_before     = ref false in
+  let encode_meta_rules   = ref false in
+  let decoding            = ref true  in
   let options = Arg.align
     [ ( "-l"
       , Arg.Unit (fun () -> (set_debug_mode "a"))
@@ -54,8 +57,14 @@ let _ =
     ; ("--encoding"
       , Arg.String set_encoding
       , " Encoding the Dedukti file.")
+    ; ("--no-decoding"
+      , Arg.Unit   (fun () -> decoding := false)
+      , " Terms are not decoded after. Usage is mainly for debugging purpose.")
+    ; ("--encoding-meta"
+      , Arg.Unit (fun () -> encode_meta_rules := true)
+      , " Meta rules are also encoded. However this does not work with product encoding")
     ; ("--register-before"
-      , Arg.Unit (fun () -> Dkmeta.set_register_before true)
+      , Arg.Unit (fun () -> register_before := true)
       , " With a typed encoding, entries are registered before they are metaified")
     ; ("--switch-beta-off"
       , Arg.Unit switch_beta_off,
@@ -84,6 +93,9 @@ let _ =
     { default_config with
       beta = !beta;
       encoding = !encoding;
+      register_before = !register_before;
+      encode_meta_rules = !encode_meta_rules;
+      decoding = !decoding;
       env = Env.init (Parsers.Parser.input_from_string (Basic.mk_mident "meta") "")
     })
   in
@@ -95,7 +107,7 @@ let _ =
   else
     begin
       let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
-      Errors.success "Meta files parsed.@.";
+      Errors.success "Meta files parsed.";
       let post_processing env entry =
         let (module Printer) = Env.get_printer env in
         Format.printf "%a" Printer.print_entry entry in
@@ -105,22 +117,10 @@ let _ =
                    (Format.asprintf "File '%s' was successfully metaified." (Env.get_filename env))
         | Some(env,lc,exn) -> Env.fail_env_error env lc exn
       in
-      Processor.handle_files files ~hook_after (Dkmeta.make_meta_processor cfg post_processing);
+      Processor.handle_files files ~hook_after (Dkmeta.make_meta_processor cfg ~post_processing);
       match !run_on_stdin with
       | None   -> ()
       | Some m ->
         let input = Parsers.Parser.input_from_stdin (Basic.mk_mident m) in
-        Api.Processor.handle_input input (Dkmeta.make_meta_processor cfg post_processing)
+        Api.Processor.handle_input input (Dkmeta.make_meta_processor cfg ~post_processing)
     end
-
-(* let run_on_file cfg file =
- *   let import md = Env.import Basic.dloc md in
- *   let input = open_in file in
- *   let md = E.init file in
- *   List.iter import !meta_mds;
- *   let entries = Parser.Parse_channel.parse md input in
- *   Dkmeta.init file;
- *   let entries' = List.map (Dkmeta.mk_entry cfg md) entries in
- *   List.iter (Format.printf "%a@." Printer.print_entry) entries';
- *   Errors.success "File '%s' was successfully metaified." file;
- *   close_in input *)
