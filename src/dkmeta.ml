@@ -24,7 +24,7 @@ end
 module RNS = Set.Make(struct type t = Rule.rule_name let compare = compare end)
 
 type cfg = {
-  mutable meta_rules  : RNS.t option;
+  mutable meta_rules  : RNS.t list option;
   (* Set of meta_rules used to normalize *)
   beta                : bool;
   (* Allows beta doing normalization *)
@@ -53,19 +53,19 @@ let default_config =
 
 
 (* A dkmeta configuration to a reduction configuration *)
-let red_cfg : cfg -> Reduction.red_cfg =
+let red_cfg : cfg -> Reduction.red_cfg list =
   fun cfg ->
   let open Reduction in
+  let red_cfg =
   { default_cfg with
     beta = cfg.beta;
     target = Snf;
-    strat = ByValue;
-    select = Some
-        (fun r ->
-           match cfg.meta_rules with
-           | None -> true
-           | Some meta_rules -> RNS.mem r meta_rules)
-  }
+    strat = ByValue}
+  in
+  match cfg.meta_rules with
+  | None -> [{red_cfg with select = Some (fun _ -> true)}]
+  | Some l ->  List.map (fun meta_rules -> {red_cfg with select = Some (fun r -> RNS.mem r meta_rules)}) l
+
 
 module PROD =
 struct
@@ -428,19 +428,16 @@ struct
       else if name_eq name (name_of "app") then
         begin
           match args with
-          | [f;a] ->
-            Term.mk_App2 (decode_term f) [(decode_term a)]
+          | [f;a] -> Term.mk_App2 (decode_term f) [(decode_term a)]
           | _ -> assert false
         end
       else if name_eq name (name_of "lam") then
         match args with
-        | [a] ->
-          decode_term a
+        | [a] -> decode_term a
         | _ -> assert false
       else
         mk_App (decode_term f) (decode_term a) (List.map decode_term args)
-
-    | _ -> decode_App (decode_term f) (decode_term a) (List.map decode_term args)
+    | _ -> mk_App (decode_term f) (decode_term a) (List.map decode_term args)
 
   and decode_Pi _ _ _ _ = assert false
 end
@@ -457,17 +454,20 @@ let encode sg cfg term =
 let decode cfg term =
   match cfg.encoding with
   | None -> term
-  | Some (module E:ENCODING) -> E.decode_term term
+  | Some (module E:ENCODING) ->
+   E.decode_term term
+
+
 
 let normalize cfg term =
-  let red = red_cfg cfg in
+  let reds = red_cfg cfg in
   let sg = Env.get_signature cfg.env in
-  Reduction.Default.reduction red sg term
+  List.fold_left (fun term red -> Reduction.Default.reduction red sg term) term reds
 
 let mk_term cfg ?(env=cfg.env) term =
   (* Format.eprintf "b:%a@." Pp.print_term term; *)
-  let sg    = Env.get_signature env in
-  let term' = encode sg cfg term in
+  let sg     = Env.get_signature env in
+  let term'  = encode sg cfg term in
   let term'' = normalize cfg term' in
   if cfg.decoding then
     decode cfg term''
@@ -579,15 +579,20 @@ let add_rule sg r =
 (* Several rules might be bound to different constants *)
 let add_rules sg rs = List.iter (add_rule sg) rs
 
-let meta_of_rules : Rule.untyped_rule list -> cfg -> cfg = fun rules cfg ->
+let meta_of_rules : ?staged:bool -> Rule.untyped_rule list -> cfg -> cfg =
+  fun ?(staged=false) rules cfg ->
   let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
   let sg = Env.get_signature cfg.env in
   add_rules sg rules;
   match cfg.meta_rules with
   | None ->
-    { cfg with meta_rules = Some (RNS.of_list rule_names)}
-  | Some mrules ->
-    { cfg with meta_rules = Some (RNS.union (RNS.of_list (rule_names)) mrules) }
+    { cfg with meta_rules = Some [RNS.of_list rule_names]}
+  | Some [] -> assert false
+  | Some (rs::l) ->
+    if staged then
+      { cfg with meta_rules = Some ((RNS.of_list (rule_names))::rs::l) }
+    else
+      { cfg with meta_rules = Some ((RNS.union (RNS.of_list (rule_names)) rs)::l) }
 
 
 module MetaConfiguration : Processor.S with type t = Rule.untyped_rule list =
@@ -601,12 +606,15 @@ struct
     (* TODO: Handle definitions *)
     | _ -> ()
 
-  let get_data () = List.flatten !rules
+  let get_data () =
+    let rs = List.flatten !rules in
+    rules := [];
+    rs
 
 end
 
 let meta_of_files ?cfg:(cfg=default_config) files =
-  Processor.process_files files  meta_of_rules cfg (module MetaConfiguration)
+  Processor.process_files files (meta_of_rules ~staged:true) cfg (module MetaConfiguration)
 
 let make_meta_processor cfg ~post_processing =
   let module Meta =
