@@ -18,14 +18,20 @@ let set_debug_mode opts =
   try  Env.set_debug_mode opts
   with Env.DebugFlagNotRecognized c ->
     if c = 'a' then
-      Debug.enable_flag Dkmeta.D_meta
+      Debug.enable_flag Dkmeta.debug_flag
     else
       raise (Env.DebugFlagNotRecognized c)
+
+type _ Processor.t += Dkmeta : unit Processor.t
+
+let equal (type a b) : (a Processor.t * b Processor.t) -> (a Processor.t,b Processor.t) Processor.Registration.equal option =
+    function
+    | Dkmeta, Dkmeta -> Some (Processor.Registration.Refl (Dkmeta))
+    | _ -> None
 
 let _ =
   let run_on_stdin = ref None  in
   let beta = ref true in
-  let stats = ref false in
   let switch_beta_off () = beta := false in
   let encoding : (module Dkmeta.ENCODING) option ref = ref None in
   let set_encoding enc =
@@ -54,13 +60,13 @@ let _ =
     ; ("-m"
       , Arg.String add_meta_file
       , " The file containing the meta rules.")
-    ; ("--encoding"
+    ; ("--quoting"
       , Arg.String set_encoding
       , " Encoding the Dedukti file.")
-    ; ("--no-decoding"
+    ; ("--no-quoting"
       , Arg.Unit   (fun () -> decoding := false)
       , " Terms are not decoded after. Usage is mainly for debugging purpose.")
-    ; ("--encoding-meta"
+    ; ("--quoting-meta"
       , Arg.Unit (fun () -> encode_meta_rules := true)
       , " Meta rules are also encoded. However this does not work with product encoding")
     ; ("--register-before"
@@ -75,9 +81,6 @@ let _ =
     ; ( "-version"
       , Arg.Unit (fun () -> Format.printf "Meta Dedukti %s@." Dkmeta.version)
       , " Print the version number" )
-    ; ( "--stats"
-      , Arg.Unit (fun () -> stats := true)
-      , " Print statistics" )
     ; ( "-I"
       , Arg.String Files.add_path
       , " DIR Add the directory DIR to the load path" )]
@@ -99,28 +102,26 @@ let _ =
       env = Env.init (Parsers.Parser.input_from_string (Basic.mk_mident "meta") "")
     })
   in
-  if !stats then
-    begin
-      List.iter Stats.run_on_meta_file !meta_files;
-      List.iter Stats.run_on_file files
-    end
-  else
-    begin
-      let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
-      Errors.success "Meta files parsed.";
-      let post_processing env entry =
-        let (module Printer) = Env.get_printer env in
-        Format.printf "%a" Printer.print_entry entry in
-      let hook_after env exn =
-        match exn with
-        | None ->Errors.success
-                   (Format.asprintf "File '%s' was successfully metaified." (Env.get_filename env))
-        | Some(env,lc,exn) -> Env.fail_env_error env lc exn
-      in
-      Processor.handle_files files ~hook_after (Dkmeta.make_meta_processor cfg ~post_processing);
-      match !run_on_stdin with
-      | None   -> ()
-      | Some m ->
-        let input = Parsers.Parser.input_from_stdin (Basic.mk_mident m) in
-        Api.Processor.handle_input input (Dkmeta.make_meta_processor cfg ~post_processing)
-    end
+  begin
+    let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
+    Errors.success "Meta files parsed.";
+    let post_processing env entry =
+      let (module Printer) = Env.get_printer env in
+      Format.printf "%a" Printer.print_entry entry in
+    let hook =
+      {Processor.before = (fun _ -> ());
+         after = fun env exn ->
+           match exn with
+           | None ->Errors.success
+                      (Format.asprintf "File '%s' was successfully metaified." (Env.get_filename env))
+           | Some(env,lc,exn) -> Env.fail_env_error env lc exn}
+    in
+    let processor = Dkmeta.make_meta_processor cfg ~post_processing in
+    Processor.Registration.register_processor Dkmeta {equal} processor;
+    match !run_on_stdin with
+    | None   ->
+      Processor.handle_files files ~hook Dkmeta
+    | Some m ->
+      let input = Parsers.Parser.input_from_stdin (Basic.mk_mident m) in
+      Api.Processor.handle_input input ~hook Dkmeta
+  end

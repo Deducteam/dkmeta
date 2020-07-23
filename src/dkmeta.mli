@@ -27,7 +27,7 @@ sig
   val decode_term : Term.term -> Term.term
   (** [decode_term t] decodes a term [t] *)
 
-  val encode_rule : ?sg:Signature.t -> 'a Term.context Rule.rule -> 'a Term.context Rule.rule
+  val encode_rule : ?sg:Signature.t -> 'a Rule.rule -> 'a Rule.rule
   (** [encode_rule sg r] encodes a rule [r]. [sg] is used only if [safe] is true *)
 end
 
@@ -69,11 +69,11 @@ module PROD : ENCODING
 module APP : ENCODING
 (** Same as [LF] with type informations for application on product only. *)
 
-type Basic.Debug.flag += D_meta
+val debug_flag : Basic.Debug.flag
 
-module MetaConfiguration : Api.Processor.S with type t = Rule.untyped_rule list
+module MetaConfiguration : Api.Processor.S with type t = Rule.partially_typed_rule list
 
-val meta_of_rules: ?staged:bool -> Rule.untyped_rule list -> cfg -> cfg
+val meta_of_rules: ?staged:bool -> Rule.partially_typed_rule list -> cfg -> cfg
 (** [meta_of_rules rs cfg] adds the meta_rules [rs] in the configuration [cfg] *)
 
 val meta_of_files : ?cfg:cfg -> string list -> cfg
@@ -88,3 +88,5 @@ val mk_term      : cfg -> ?env:Env.t -> Term.term -> Term.term
 
 val mk_entry : Env.t -> cfg -> Entry.entry -> Entry.entry
   (** [mk_entry env cfg entry] processes an entry according the meta configuration [cfg] and the current environment [env] *)
+
+type _ Processor.t += MetaRules : Rule.partially_typed_rule list Processor.t

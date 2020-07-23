@@ -18,7 +18,7 @@ sig
 
   val decode_term : Term.term -> Term.term
 
-  val encode_rule : ?sg:Signature.t ->  'a Term.context Rule.rule -> 'a Term.context Rule.rule
+  val encode_rule : ?sg:Signature.t ->  'a Rule.rule -> 'a Rule.rule
 end
 
 module RNS = Set.Make(struct type t = Rule.rule_name let compare = compare end)
@@ -76,14 +76,14 @@ struct
 
   let entries () =
     let mk_decl id =
-      Entry.Decl(dloc,mk_ident id, Signature.Definable,mk_Type dloc)
+      Entry.Decl(dloc,mk_ident id, Signature.Public, Signature.Definable Free,mk_Type dloc)
     in
     List.map mk_decl ["ty"; "prod"]
 
   let signature =
     let sg = Signature.make md Files.find_object_file in
     let mk_decl id =
-      Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
+      Signature.add_declaration sg dloc (mk_ident id) Signature.Public (Signature.Definable Free) (mk_Type dloc)
     in
     List.iter mk_decl ["ty"; "prod"]; sg
 
@@ -177,14 +177,14 @@ struct
 
   let entries () =
     let mk_decl id =
-      Entry.Decl(dloc,mk_ident id, Signature.Definable,mk_Type dloc)
+      Entry.Decl(dloc,mk_ident id, Signature.Public, Signature.Definable Free, mk_Type dloc)
     in
     List.map mk_decl ["ty"; "var";"sym";"lam";"app";"prod"]
 
   let signature =
     let sg = Signature.make md Files.find_object_file in
     let mk_decl id =
-      Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
+      Signature.add_declaration sg dloc (mk_ident id) Signature.Public (Signature.Definable Free) (mk_Type dloc)
     in
     List.iter mk_decl ["ty"; "var";"sym";"lam";"app";"prod"];
     sg
@@ -304,14 +304,14 @@ struct
 
   let entries () =
     let mk_decl id =
-      Entry.Decl(dloc,mk_ident id, Signature.Definable,mk_Type dloc)
+      Entry.Decl(dloc,mk_ident id, Signature.Public, Signature.Definable Free, mk_Type dloc)
     in
     List.map mk_decl ["ty"; "var";"sym";"lam";"app";"prod"]
 
   let signature =
     let sg = Signature.make md Files.find_object_file in
     let mk_decl id =
-      Signature.add_declaration sg dloc (mk_ident id) Signature.Definable (mk_Type dloc)
+      Signature.add_declaration sg dloc (mk_ident id) Signature.Public (Signature.Definable Free) (mk_Type dloc)
     in
     List.iter mk_decl ["ty"; "var";"sym";"lam";"app";"prod"];
     sg
@@ -493,7 +493,7 @@ let rec pattern_of_term = fun t ->
     Rule.Var(lc,x,n,[])
   | _ -> raise Not_a_pattern
 
-let mk_rule env cfg (r: 'a Term.context Rule.rule) =
+let mk_rule env cfg (r: Rule.partially_typed_rule) =
   let open Rule in
   match cfg.encoding with
   | None ->
@@ -513,12 +513,12 @@ let mk_rule env cfg (r: 'a Term.context Rule.rule) =
   pattern_of_term t' *)
 
 module D = Basic.Debug
-type D.flag += D_meta
-let _ = D.register_flag D_meta "Dkmeta"
+
+let debug_flag = D.register_flag "Dkmeta"
 
 let bmag fmt = "\027[90m" ^^ fmt ^^ "\027[0m%!"
 
-let log fmt = D.debug D_meta (bmag fmt)
+let log fmt = D.debug debug_flag (bmag fmt)
 
 let mk_entry env = fun cfg entry ->
   let open Entry in
@@ -526,15 +526,15 @@ let mk_entry env = fun cfg entry ->
   let sg = Env.get_signature env in
   let md = Env.get_name env in
   match entry with
-  | Decl(lc,id,st,ty) ->
+  | Decl(lc,id,sc,st,ty) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
     let ty' = mk_term cfg ~env ty in
     if cfg.register_before then
-      Signature.add_declaration sg lc id st ty
+      Signature.add_declaration sg lc id sc st ty
     else
-      Signature.add_declaration sg lc id st ty';
-    Decl(lc,id, st , ty')
-  | Def(lc,id,opaque, ty,te) ->
+      Signature.add_declaration sg lc id sc st ty';
+    Decl(lc,id, sc, st , ty')
+  | Def(lc,id, sc, opaque, ty,te) ->
     log "[NORMALIZE] %a" Basic.pp_ident id;
     let cst = Basic.mk_name md id in
     let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
@@ -548,18 +548,18 @@ let mk_entry env = fun cfg entry ->
     let te' = mk_term cfg ~env te in
     begin
       if cfg.register_before then
-        let _ = Signature.add_declaration sg lc id Signature.Definable safe_ty in
+        let _ = Signature.add_declaration sg lc id sc (Signature.Definable Free) safe_ty in
         Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te}])
       else
-        let _ = Signature.add_declaration sg lc id Signature.Definable safe_ty' in
+        let _ = Signature.add_declaration sg lc id sc (Signature.Definable Free) safe_ty' in
         Signature.add_rules sg (List.map Rule.to_rule_infos [{rule with rhs=te'}])
     end;
     begin
       match ty with
       | None ->
-        Def(lc,id,opaque, None, te')
+        Def(lc,id, sc, opaque, None, te')
       | Some _ ->
-        Def(lc,id,opaque, Some safe_ty', te')
+        Def(lc,id, sc, opaque, Some safe_ty', te')
     end
   | Rules(lc,rs) ->
     (* Signature.add_rules !sg (List.map Rule.to_rule_infos rs); *)
@@ -579,9 +579,9 @@ let add_rule sg r =
 (* Several rules might be bound to different constants *)
 let add_rules sg rs = List.iter (add_rule sg) rs
 
-let meta_of_rules : ?staged:bool -> Rule.untyped_rule list -> cfg -> cfg =
+let meta_of_rules : ?staged:bool -> Rule.partially_typed_rule list -> cfg -> cfg =
   fun ?(staged=false) rules cfg ->
-  let rule_names = List.map (fun (r:Rule.untyped_rule) -> r.Rule.name) rules in
+  let rule_names = List.map (fun (r:Rule.partially_typed_rule) -> r.Rule.name) rules in
   let sg = Env.get_signature cfg.env in
   add_rules sg rules;
   match cfg.meta_rules with
@@ -595,10 +595,10 @@ let meta_of_rules : ?staged:bool -> Rule.untyped_rule list -> cfg -> cfg =
       { cfg with meta_rules = Some ((RNS.union (RNS.of_list (rule_names)) rs)::l) }
 
 
-module MetaConfiguration : Processor.S with type t = Rule.untyped_rule list =
+module MetaConfiguration : Processor.S with type t = Rule.partially_typed_rule list =
 struct
 
-  type t = Rule.untyped_rule list
+  type t = Rule.partially_typed_rule list
 
   let rules = ref []
   let handle_entry _ = function
@@ -606,15 +606,26 @@ struct
     (* TODO: Handle definitions *)
     | _ -> ()
 
-  let get_data () =
+  let get_data _ =
     let rs = List.flatten !rules in
     rules := [];
     rs
 
 end
 
+type _ Processor.t += MetaRules : Rule.partially_typed_rule list Processor.t
+
+
+let _ =
+  let equal (type a b) : (a Processor.t * b Processor.t) -> (a Processor.t,b Processor.t) Processor.Registration.equal option =
+    function
+    | MetaRules, MetaRules -> Some (Processor.Registration.Refl (MetaRules))
+    | _ -> None
+  in
+  Processor.Registration.register_processor MetaRules {equal} (module MetaConfiguration)
+
 let meta_of_files ?cfg:(cfg=default_config) files =
-  Processor.process_files files (meta_of_rules ~staged:true) cfg (module MetaConfiguration)
+  Processor.fold_files files ~f:(meta_of_rules ~staged:true) ~default:cfg MetaRules
 
 let make_meta_processor cfg ~post_processing =
   let module Meta =
@@ -623,7 +634,7 @@ let make_meta_processor cfg ~post_processing =
 
     let handle_entry env entry = post_processing env (mk_entry env cfg entry)
 
-    let get_data () = ()
+    let get_data _ = ()
   end
   in
   (module Meta : Processor.S with type t = unit)
