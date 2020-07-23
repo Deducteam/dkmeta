@@ -1,0 +1,21 @@
+lib: [
+  "_build/install/default/lib/dkmeta/META"
+  "_build/install/default/lib/dkmeta/dkmeta.a"
+  "_build/install/default/lib/dkmeta/dkmeta.cma"
+  "_build/install/default/lib/dkmeta/dkmeta.cmi"
+  "_build/install/default/lib/dkmeta/dkmeta.cmt"
+  "_build/install/default/lib/dkmeta/dkmeta.cmti"
+  "_build/install/default/lib/dkmeta/dkmeta.cmx"
+  "_build/install/default/lib/dkmeta/dkmeta.cmxa"
+  "_build/install/default/lib/dkmeta/dkmeta.cmxs"
+  "_build/install/default/lib/dkmeta/dkmeta.ml"
+  "_build/install/default/lib/dkmeta/dkmeta.mli"
+  "_build/install/default/lib/dkmeta/dune-package"
+  "_build/install/default/lib/dkmeta/opam"
+]
+bin: [
+  "_build/install/default/bin/dkmeta"
+]
+doc: [
+  "_build/install/default/doc/dkmeta/README.md"
+]

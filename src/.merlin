@@ -1,0 +1,13 @@
+EXCLUDE_QUERY_DIR
+B /home/saroupille/.opam/4.09.0/lib/dedukti/api
+B /home/saroupille/.opam/4.09.0/lib/dedukti/kernel
+B /home/saroupille/.opam/4.09.0/lib/dedukti/parsers
+B /home/saroupille/.opam/4.09.0/lib/ocaml
+B ../_build/default/src/.dkmeta.objs/byte
+B ../_build/default/src/.main.eobjs/byte
+S /home/saroupille/.opam/4.09.0/lib/dedukti/api
+S /home/saroupille/.opam/4.09.0/lib/dedukti/kernel
+S /home/saroupille/.opam/4.09.0/lib/dedukti/parsers
+S /home/saroupille/.opam/4.09.0/lib/ocaml
+S .
+FLG -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs

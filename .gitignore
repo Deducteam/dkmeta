@@ -4,7 +4,6 @@
 .\#*
 
 # ML files
-*.mli
 *.cmo
 *.cmi
 *.native

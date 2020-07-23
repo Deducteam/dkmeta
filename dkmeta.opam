@@ -1,0 +1,19 @@
+synopsis: "A tool for Dedukti to use the rewrite engine as a programming language"
+description:
+"""
+Dkmeta is a tool for Dedukti to use the rewrite engine as a programming language
+"""
+opam-version: "0.1"
+maintainer: "francois.thire@lsv.fr"
+bug-reports: "https://github.com/francoisthire/dkmeta/issues"
+homepage: "https://github.com/francoisthire/dkmeta"
+dev-repo: "git+https://github.com/francoisthire/dkmeta.git"
+authors: [ "François Thiré <francois.thire@lsv.fr>" ]
+license: "CeCILL"
+
+depends: [
+  "ocaml"        {         >= "4.04.0" }
+  "dedukti"
+]
+
+build: [ [ "dune" "build" "-p" name "-j" jobs ] ]

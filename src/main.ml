@@ -1,13 +1,12 @@
+open Kernel
 open Basic
-open Dkmeta
+open Api
 
-module E = Env.Make(Reduction.Default)
-module Printer = E.Printer
-module Errors = Errors.Make(E)
-
+(* By default, we don't wont to fail if a symbol is not found in a signature. This is to simplify the use of dkmeta and to add in the signature only the definable meta symbols. *)
 let _ = Signature.fail_on_symbol_not_found := false
 
 let meta_files : string list ref = ref []
+
 let add_meta_file s =
   meta_files := s::!meta_files
 
@@ -15,42 +14,39 @@ let meta_mds : Basic.mident list ref = ref []
 let add_meta_md md =
   meta_mds := md::!meta_mds
 
-let run_on_file cfg file =
-  let import md = E.import Basic.dloc md in
-  let input = open_in file in
-  let md = E.init file in
-  List.iter import !meta_mds;
-  let entries = Parser.Parse_channel.parse md input in
-  Dkmeta.init file;
-  let entries' = List.map (Dkmeta.mk_entry cfg md) entries in
-  List.iter (Format.printf "%a@." Printer.print_entry) entries';
-  Errors.success "File '%s' was successfully metaified." file;
-  close_in input
-
 let set_debug_mode opts =
   try  Env.set_debug_mode opts
   with Env.DebugFlagNotRecognized c ->
     if c = 'a' then
-      Debug.enable_flag Dkmeta.D_meta
+      Debug.enable_flag Dkmeta.debug_flag
     else
       raise (Env.DebugFlagNotRecognized c)
+
+type _ Processor.t += Dkmeta : unit Processor.t
+
+let equal (type a b) : (a Processor.t * b Processor.t) -> (a Processor.t,b Processor.t) Processor.Registration.equal option =
+    function
+    | Dkmeta, Dkmeta -> Some (Processor.Registration.Refl (Dkmeta))
+    | _ -> None
 
 let _ =
   let run_on_stdin = ref None  in
   let beta = ref true in
-  let stats = ref false in
   let switch_beta_off () = beta := false in
-  let encoding : (module Dkmeta.Encoding) option ref = ref None in
+  let encoding : (module Dkmeta.ENCODING) option ref = ref None in
   let set_encoding enc =
     if enc = "lf" then
       encoding := Some (module Dkmeta.LF)
     else if enc = "prod" then
       encoding := Some (module Dkmeta.PROD)
-    else if enc = "app" then
+    else if enc = "ltyped" then
       encoding := Some (module Dkmeta.APP)
     else
-      Errors.fail_exit (-1) "-1" None (Some dloc) "Unknown encoding '%s'" enc
+      Errors.fail_exit ~file:"" ~code:"-1" (Some dloc) "Unknown encoding '%s'" enc
   in
+  let register_before     = ref false in
+  let encode_meta_rules   = ref false in
+  let decoding            = ref true  in
   let options = Arg.align
     [ ( "-l"
       , Arg.Unit (fun () -> (set_debug_mode "a"))
@@ -64,9 +60,18 @@ let _ =
     ; ("-m"
       , Arg.String add_meta_file
       , " The file containing the meta rules.")
-    ; ("--encoding"
+    ; ("--quoting"
       , Arg.String set_encoding
       , " Encoding the Dedukti file.")
+    ; ("--no-quoting"
+      , Arg.Unit   (fun () -> decoding := false)
+      , " Terms are not decoded after. Usage is mainly for debugging purpose.")
+    ; ("--quoting-meta"
+      , Arg.Unit (fun () -> encode_meta_rules := true)
+      , " Meta rules are also encoded. However this does not work with product encoding")
+    ; ("--register-before"
+      , Arg.Unit (fun () -> register_before := true)
+      , " With a typed encoding, entries are registered before they are metaified")
     ; ("--switch-beta-off"
       , Arg.Unit switch_beta_off,
       " switch off beta while normalizing terms")
@@ -76,11 +81,8 @@ let _ =
     ; ( "-version"
       , Arg.Unit (fun () -> Format.printf "Meta Dedukti %s@." Dkmeta.version)
       , " Print the version number" )
-    ; ( "--stats"
-      , Arg.Unit (fun () -> stats := true)
-      , " Print statistics" )
     ; ( "-I"
-      , Arg.String Basic.add_path
+      , Arg.String Files.add_path
       , " DIR Add the directory DIR to the load path" )]
   in
   let usage = "Usage: " ^ Sys.argv.(0) ^ " [OPTION]... [FILE]...\n" in
@@ -94,31 +96,32 @@ let _ =
     { default_config with
       beta = !beta;
       encoding = !encoding;
-      sg = Signature.make "meta" (* the name is not relevant here *)
+      register_before = !register_before;
+      encode_meta_rules = !encode_meta_rules;
+      decoding = !decoding;
+      env = Env.init (Parsers.Parser.input_from_string (Basic.mk_mident "meta") "")
     })
   in
-  try
-    if !stats then
-      begin
-        List.iter Stats.run_on_meta_file !meta_files;
-        List.iter Stats.run_on_file files
-      end
-    else
-      let cfg = List.fold_left (fun cfg f -> Dkmeta.meta_of_file f cfg) cfg !meta_files in
-      Errors.success "Meta files parsed.@.";
-      List.iter (run_on_file cfg) files;
-      match !run_on_stdin with
-      | None   -> ()
-      | Some m ->
-        let md = E.init m in
-        let mk_entry e =
-          Format.printf "%a@." Printer.print_entry (Dkmeta.mk_entry cfg md e)
-        in
-        Parser.Parse_channel.handle md mk_entry stdin;
-        Errors.success "Standard input was successfully checked.@."
-  with
-  | Signature.SignatureError sg -> Errors.fail_env_error(None,Basic.dloc, Env.EnvErrorSignature sg)
-  | Env.EnvError(md,l,e) -> Errors.fail_env_error(md,l,e)
-  | Typing.TypingError t -> Errors.fail_env_error(None,Basic.dloc, Env.EnvErrorType t)
-  | Sys_error err        -> Format.eprintf "ERROR %s.@." err; exit 1
-  | Exit                 -> exit 3
+  begin
+    let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
+    Errors.success "Meta files parsed.";
+    let post_processing env entry =
+      let (module Printer) = Env.get_printer env in
+      Format.printf "%a" Printer.print_entry entry in
+    let hook =
+      {Processor.before = (fun _ -> ());
+         after = fun env exn ->
+           match exn with
+           | None ->Errors.success
+                      (Format.asprintf "File '%s' was successfully metaified." (Env.get_filename env))
+           | Some(env,lc,exn) -> Env.fail_env_error env lc exn}
+    in
+    let processor = Dkmeta.make_meta_processor cfg ~post_processing in
+    Processor.Registration.register_processor Dkmeta {equal} processor;
+    match !run_on_stdin with
+    | None   ->
+      Processor.handle_files files ~hook Dkmeta
+    | Some m ->
+      let input = Parsers.Parser.input_from_stdin (Basic.mk_mident m) in
+      Api.Processor.handle_input input ~hook Dkmeta
+  end
