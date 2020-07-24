@@ -14,34 +14,6 @@ open Api
 
 val version : string
 
-module type QUOTING = sig
-  val md : Basic.mident
-  (** module name of the encoding *)
-
-  val entries : unit -> Entry.entry list
-  (** List of declarations *)
-
-  val safe : bool
-  (** If [safe], the encoding needs type checking. Type checking is
-     done before encoding. *)
-
-  val signature : Signature.t
-  (** Signature of the encoding. Redudant with [entries] *)
-
-  val quote_term :
-    ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
-  (** [quote_term sg ctx t] quotes a term [t]. [sg] and [ctx] are used
-     only if [safe] is true *)
-
-  val unquote_term : Term.term -> Term.term
-  (** [unquote_term t] decodes a term [t] *)
-
-  val encode_rule :
-    ?sg:Signature.t -> Rule.partially_typed_rule -> Rule.partially_typed_rule
-  (** [encode_rule sg r] encodes a rule [r]. [sg] is used only if
-       [safe] is true *)
-end
-
 module RNS : Set.S with type elt = Rule.rule_name
 
 type cfg = {
@@ -51,7 +23,8 @@ type cfg = {
       (** entries are registered before they have been normalized *)
   encode_meta_rules : bool;
       (** The quoting function is used on the meta rules first except for products *)
-  quoting : (module QUOTING) option;  (** Set a quoting before normalization *)
+  quoting : (module Quoting.S) option;
+      (** Set a quoting before normalization *)
   unquoting : bool;
       (** If false, the term is not decoded after normalization *)
   env : Env.t;
@@ -80,16 +53,6 @@ val default_config : cfg
 val red_cfg : cfg -> Reduction.red_cfg list
 (** Transform a [dkmeta] cfg to a [red_cfg] that can be used by the
    Rewrite Engine of Dedukti. *)
-
-module LF : QUOTING
-(** Prefixing each subterm with its construtor *)
-
-module PROD : QUOTING
-(** Quoting products with HOAS *)
-
-module APP : QUOTING
-(** Same as [LF] with type informations for application on product
-   only. *)
 
 val debug_flag : Basic.Debug.flag
 

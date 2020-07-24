@@ -19,7 +19,7 @@ let add_meta_file s = meta_files := s :: !meta_files
 let set_debug_mode opts =
   try Env.set_debug_mode opts
   with Env.DebugFlagNotRecognized c ->
-    if c = 'a' then Debug.enable_flag Dkmeta.debug_flag
+    if c = 'a' then Debug.enable_flag Meta.Dkmeta.debug_flag
     else raise (Env.DebugFlagNotRecognized c)
 
 (* The processor declared by dkmeta when used with the command line *)
@@ -36,11 +36,11 @@ let _ =
   let run_on_stdin = ref None in
   let beta = ref true in
   let switch_beta_off () = beta := false in
-  let quoting : (module Dkmeta.QUOTING) option ref = ref None in
+  let quoting : (module Meta.Quoting.S) option ref = ref None in
   let set_quoting func =
-    if func = "lf" then quoting := Some (module Dkmeta.LF)
-    else if func = "prod" then quoting := Some (module Dkmeta.PROD)
-    else if func = "ltyped" then quoting := Some (module Dkmeta.APP)
+    if func = "lf" then quoting := Some (module Meta.Quoting.LF)
+    else if func = "prod" then quoting := Some (module Meta.Quoting.PROD)
+    else if func = "ltyped" then quoting := Some (module Meta.Quoting.APP)
     else
       Errors.fail_exit ~file:"" ~code:"-1" (Some dloc)
         "Unknown quoting function '%s'" func
@@ -81,7 +81,8 @@ let _ =
           Arg.String (fun n -> run_on_stdin := Some n),
           " MOD Parses standard input using module name MOD" );
         ( "-version",
-          Arg.Unit (fun () -> Format.printf "Meta Dedukti %s@." Dkmeta.version),
+          Arg.Unit
+            (fun () -> Format.printf "Meta Dedukti %s@." Meta.Dkmeta.version),
           " Print the version number" );
         ( "-I",
           Arg.String Files.add_path,
@@ -97,7 +98,7 @@ let _ =
   in
   (* Modified configuration with options given on the command line *)
   let cfg =
-    Dkmeta.
+    Meta.Dkmeta.
       {
         default_config with
         beta = !beta;
@@ -110,7 +111,7 @@ let _ =
             (Parsers.Parser.input_from_string (Basic.mk_mident "meta") "");
       }
   in
-  let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
+  let cfg = Meta.Dkmeta.meta_of_files ~cfg !meta_files in
   Errors.success "Meta files parsed.";
   let post_processing env entry =
     let (module Printer) = Env.get_printer env in
@@ -129,7 +130,7 @@ let _ =
           | Some (env, lc, exn) -> Env.fail_env_error env lc exn);
     }
   in
-  let processor = Dkmeta.make_meta_processor cfg ~post_processing in
+  let processor = Meta.Dkmeta.make_meta_processor cfg ~post_processing in
   Processor.Registration.register_processor Dkmeta { equal } processor;
   match !run_on_stdin with
   | None -> Processor.handle_files files ~hook Dkmeta

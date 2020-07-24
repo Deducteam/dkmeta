@@ -1,11 +1,11 @@
 (library
-    (name dkmeta)
+    (name meta)
     (public_name dkmeta)
-    (modules dkmeta)
+    (modules dkmeta quoting)
     (libraries dedukti.kernel dedukti.api dedukti.parsers))
 
 (executable
     (name main)
     (public_name dkmeta)
-    (modules main stats)
+    (modules main)
     (libraries dedukti.api dkmeta))
