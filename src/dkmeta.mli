@@ -7,7 +7,7 @@ open Api
 
 val version : string
 
-module type ENCODING =
+module type QUOTING =
 sig
   val md : Basic.mident
   (** module name of the encoding *)
@@ -21,11 +21,11 @@ sig
   val signature : Signature.t
   (** Signature of the encoding. Redudant with [entries] *)
 
-  val encode_term : ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
-  (** [encode_term sg ctx t] encodes a term [t]. [sg] and [ctx] are used only if [safe] is true *)
+  val quote_term : ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
+  (** [quote_term sg ctx t] quotes a term [t]. [sg] and [ctx] are used only if [safe] is true *)
 
-  val decode_term : Term.term -> Term.term
-  (** [decode_term t] decodes a term [t] *)
+  val unquote_term : Term.term -> Term.term
+  (** [unquote_term t] decodes a term [t] *)
 
   val encode_rule : ?sg:Signature.t -> 'a Rule.rule -> 'a Rule.rule
   (** [encode_rule sg r] encodes a rule [r]. [sg] is used only if [safe] is true *)
@@ -42,10 +42,10 @@ type cfg = {
   register_before     : bool;
   (** entries are registered before they have been normalized *)
   encode_meta_rules   : bool;
-  (** The encoding is used on the meta rules first except for products *)
-  encoding            : (module ENCODING) option;
-  (** Set an encoding before normalization *)
-  decoding            : bool;
+  (** The quoting function is used on the meta rules first except for products *)
+  quoting            : (module QUOTING) option;
+  (** Set a quoting before normalization *)
+  unquoting            : bool;
   (** If false, the term is not decoded after normalization *)
   env                 : Env.t
 }
@@ -60,13 +60,13 @@ val default_config : cfg
 (** Transform a [dkmeta] cfg to a [red_cfg] that can be used by the Rewrite Engine of Dedukti. *)
 val red_cfg : cfg -> Reduction.red_cfg list
 
-module LF : ENCODING
-(** Prefix each subterm with its construtor *)
+module LF : QUOTING
+(** Prefixing each subterm with its construtor *)
 
-module PROD : ENCODING
-(** Encodes products with HOAS *)
+module PROD : QUOTING
+(** Quoting products with HOAS *)
 
-module APP : ENCODING
+module APP : QUOTING
 (** Same as [LF] with type informations for application on product only. *)
 
 val debug_flag : Basic.Debug.flag

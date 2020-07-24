@@ -33,14 +33,14 @@ let _ =
   let run_on_stdin = ref None  in
   let beta = ref true in
   let switch_beta_off () = beta := false in
-  let encoding : (module Dkmeta.ENCODING) option ref = ref None in
-  let set_encoding enc =
+  let quoting : (module Dkmeta.QUOTING) option ref = ref None in
+  let set_quoting enc =
     if enc = "lf" then
-      encoding := Some (module Dkmeta.LF)
+      quoting := Some (module Dkmeta.LF)
     else if enc = "prod" then
-      encoding := Some (module Dkmeta.PROD)
+      quoting := Some (module Dkmeta.PROD)
     else if enc = "ltyped" then
-      encoding := Some (module Dkmeta.APP)
+      quoting := Some (module Dkmeta.APP)
     else
       Errors.fail_exit ~file:"" ~code:"-1" (Some dloc) "Unknown encoding '%s'" enc
   in
@@ -61,7 +61,7 @@ let _ =
       , Arg.String add_meta_file
       , " The file containing the meta rules.")
     ; ("--quoting"
-      , Arg.String set_encoding
+      , Arg.String set_quoting
       , " Encoding the Dedukti file.")
     ; ("--no-quoting"
       , Arg.Unit   (fun () -> decoding := false)
@@ -95,10 +95,10 @@ let _ =
   let cfg = Dkmeta.(
     { default_config with
       beta = !beta;
-      encoding = !encoding;
+      quoting = !quoting;
       register_before = !register_before;
       encode_meta_rules = !encode_meta_rules;
-      decoding = !decoding;
+      unquoting = !decoding;
       env = Env.init (Parsers.Parser.input_from_string (Basic.mk_mident "meta") "")
     })
   in

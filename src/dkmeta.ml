@@ -4,7 +4,7 @@ open Parsers
 
 let version = "0.1"
 
-module type ENCODING =
+module type QUOTING =
 sig
   val md : Basic.mident
 
@@ -14,9 +14,9 @@ sig
 
   val signature : Signature.t
 
-  val encode_term : ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
+  val quote_term : ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
 
-  val decode_term : Term.term -> Term.term
+  val unquote_term : Term.term -> Term.term
 
   val encode_rule : ?sg:Signature.t ->  'a Rule.rule -> 'a Rule.rule
 end
@@ -32,9 +32,9 @@ type cfg = {
   (* entries are registered before they have been normalized *)
   encode_meta_rules   : bool;
   (* The encoding is used on the meta rules first except for products *)
-  encoding            : (module ENCODING) option;
+  quoting            : (module QUOTING) option;
   (* Encoding specify a quoting mechanism *)
-  decoding            : bool;
+  unquoting            : bool;
   (* If false, the term is not decoded after normalization *)
   env                 : Env.t
   (* The current environment (if the encoding needs type checking *)
@@ -44,11 +44,11 @@ let default_config =
   {
     meta_rules        = None;
     beta              = true;
-    encoding          = None;
+    quoting           = None;
     register_before   = true;
     encode_meta_rules = false;
     env               = Env.init (Parser.input_from_string (Basic.mk_mident "") "");
-    decoding          = true;
+    unquoting         = true;
   }
 
 
@@ -93,7 +93,7 @@ struct
 
   let const_of str = mk_Const dloc (name_of str)
 
-  let rec encode_term t =
+  let rec quote_term t =
     match t with
     | Kind -> assert false
     | Type(lc) -> encode_type lc
@@ -110,14 +110,14 @@ struct
   and encode_Const _ name = mk_Const dloc name
 
   and encode_Lam _ x mty te =
-    let mty' = match mty with None -> None | Some ty -> Some (encode_term  ty) in
-    mk_Lam dloc x mty' (encode_term  te)
+    let mty' = match mty with None -> None | Some ty -> Some (quote_term  ty) in
+    mk_Lam dloc x mty' (quote_term  te)
 
   and encode_App f a args =
-    mk_App2 (encode_term  f) (List.map (encode_term ) (a::args))
+    mk_App2 (quote_term  f) (List.map (quote_term ) (a::args))
 
   and encode_Pi _ x a b =
-    mk_App (const_of "prod") (encode_term a) [mk_Lam dloc x (Some (encode_term  a)) (encode_term  b)]
+    mk_App (const_of "prod") (quote_term a) [mk_Lam dloc x (Some (quote_term  a)) (quote_term  b)]
 
   (* Using typed context here does not make sense *)
   let encode_pattern  pattern : Rule.pattern = pattern
@@ -126,14 +126,14 @@ struct
     let open Rule in
     { r with
       pat = encode_pattern r.pat;
-      rhs = encode_term r.rhs
+      rhs = quote_term r.rhs
     }
 
-  let encode_term ?sg:_ ?ctx:_ t = encode_term t
+  let quote_term ?sg:_ ?ctx:_ t = quote_term t
 
   let encode_rule ?sg:_ r = encode_rule r
 
-  let rec decode_term t =
+  let rec unquote_term t =
     match t with
     | Kind             -> assert false
     | Pi _             -> assert false
@@ -150,8 +150,8 @@ struct
       mk_Const lc name
 
   and decode_Lam lc x mty te =
-    let mty' = match mty with None -> None | Some mty -> Some (decode_term mty) in
-    mk_Lam lc x mty' (decode_term te)
+    let mty' = match mty with None -> None | Some mty -> Some (unquote_term mty) in
+    mk_Lam lc x mty' (unquote_term te)
 
   and decode_App f a args =
     match f with
@@ -159,12 +159,12 @@ struct
       begin
         if name_eq name (name_of "prod") then
           match args with
-          | [Lam(_,x,Some a, b)] -> mk_Pi dloc x (decode_term a) (decode_term b)
+          | [Lam(_,x,Some a, b)] -> mk_Pi dloc x (unquote_term a) (unquote_term b)
           | _ -> assert false
         else
-            mk_App (decode_term f) (decode_term a) (List.map decode_term args)
+            mk_App (unquote_term f) (unquote_term a) (List.map unquote_term args)
       end
-    | _ -> mk_App (decode_term f) (decode_term a) (List.map decode_term args)
+    | _ -> mk_App (unquote_term f) (unquote_term a) (List.map unquote_term args)
 
 end
 
@@ -195,7 +195,7 @@ struct
 
   let const_of str = mk_Const dloc (name_of str)
 
-  let rec encode_term t =
+  let rec quote_term t =
     match t with
     | Kind -> assert false
     | Type(lc) -> encode_type lc
@@ -214,20 +214,20 @@ struct
     mk_App (const_of "sym") (mk_Const dloc name) []
 
   and encode_Lam _ x mty te =
-    let mty' = match mty with None -> None | Some ty -> Some (encode_term  ty) in
-    mk_App (const_of "lam") (mk_Lam dloc x mty' (encode_term  te)) []
+    let mty' = match mty with None -> None | Some ty -> Some (quote_term  ty) in
+    mk_App (const_of "lam") (mk_Lam dloc x mty' (quote_term  te)) []
 
   and encode_App f a args =
     let rec encode_app2 a args =
       match a,args with
       | _, [] -> assert false
-      | a,[x] -> mk_App (const_of "app") a [(encode_term x)]
-      | a, x::l -> encode_app2 (mk_App (const_of "app") a [(encode_term x)]) l
+      | a,[x] -> mk_App (const_of "app") a [(quote_term x)]
+      | a, x::l -> encode_app2 (mk_App (const_of "app") a [(quote_term x)]) l
     in
-    encode_app2 (encode_term f) (a::args)
+    encode_app2 (quote_term f) (a::args)
 
   and encode_Pi _ x a b =
-    mk_App (const_of "prod") (encode_term a) [mk_Lam dloc x None (encode_term  b)]
+    mk_App (const_of "prod") (quote_term a) [mk_Lam dloc x None (quote_term  b)]
 
 
   (* Using typed context here does not make sense *)
@@ -235,7 +235,7 @@ struct
     let open Rule in
     match pattern with
     | Var(lc, id, n, ps) -> Var(lc,id,n, List.map (encode_pattern ) ps)
-    | Brackets(term) -> Brackets(encode_term  term)
+    | Brackets(term) -> Brackets(quote_term  term)
     | Lambda(lc, id, p) -> Pattern(lc,(name_of "lam"), [(Lambda(lc,id, encode_pattern  p))])
     | Pattern(lc,n,[]) ->
       Pattern(lc,name_of "sym", [Pattern(lc,n,[])])
@@ -246,14 +246,14 @@ struct
     let open Rule in
     { r with
       pat = encode_pattern r.pat;
-      rhs = encode_term r.rhs
+      rhs = quote_term r.rhs
     }
 
-  let encode_term ?sg:_ ?ctx:_ t = encode_term t
+  let quote_term ?sg:_ ?ctx:_ t = quote_term t
 
   let encode_rule ?sg:_ r = encode_rule r
 
-  let rec decode_term t =
+  let rec unquote_term t =
     match t with
     | Kind             -> assert false
     | Type _           -> assert false
@@ -269,28 +269,28 @@ struct
     if name_eq name (name_of "ty") then mk_Type dloc else mk_Const lc name
 
   and decode_Lam lc x mty te =
-    let mty' = match mty with None -> None | Some mty -> Some (decode_term mty) in
-    mk_Lam lc x mty' (decode_term te)
+    let mty' = match mty with None -> None | Some mty -> Some (unquote_term mty) in
+    mk_Lam lc x mty' (unquote_term te)
 
   and decode_App f a args =
     match f with
     | Const(_,name) ->
       if name_eq name (name_of "prod") then
         match a,args with
-        | a,[Lam(_,x, None, b)] -> mk_Pi dloc x (decode_term a) (decode_term b)
+        | a,[Lam(_,x, None, b)] -> mk_Pi dloc x (unquote_term a) (unquote_term b)
         | _ -> assert false
       else if name_eq name (name_of "sym") then
-        decode_term a
+        unquote_term a
       else if name_eq name (name_of "var") then
-        decode_term  a
+        unquote_term  a
       else if name_eq name (name_of "app") then
-        mk_App2 (decode_term a) (List.map decode_term args)
+        mk_App2 (unquote_term a) (List.map unquote_term args)
       else if name_eq name (name_of "lam") then
-        decode_term a
+        unquote_term a
       else
-        mk_App (decode_term f) (decode_term a) (List.map decode_term args)
+        mk_App (unquote_term f) (unquote_term a) (List.map unquote_term args)
 
-    | _ -> decode_App (decode_term f) (decode_term a) (List.map decode_term args)
+    | _ -> decode_App (unquote_term f) (unquote_term a) (List.map unquote_term args)
 
   and decode_Pi _ _ _ _ = assert false
 end
@@ -322,7 +322,7 @@ struct
 
   let const_of str = mk_Const dloc (name_of str)
 
-  let rec encode_term sg ctx t =
+  let rec quote_term sg ctx t =
     match t with
     | Kind -> assert false
     | Type(lc) -> encode_type sg ctx lc
@@ -344,8 +344,8 @@ struct
   and encode_Lam sg ctx lc x ty te =
     let ctx' = (lc, x, ty)::ctx in
     let tyf = Typing.Default.infer sg ctx (mk_Lam lc x (Some ty) te) in
-    let tyf' = PROD.encode_term tyf in
-    mk_App (const_of "lam") tyf'  [(mk_Lam dloc x (Some (encode_term sg ctx ty)) (encode_term sg ctx' te))]
+    let tyf' = PROD.quote_term tyf in
+    mk_App (const_of "lam") tyf'  [(mk_Lam dloc x (Some (quote_term sg ctx ty)) (quote_term sg ctx' te))]
 
   and encode_App sg ctx f a args =
     encode_app2 sg ctx f (a::args)
@@ -353,14 +353,14 @@ struct
   and encode_app2 sg ctx f args =
     let aux f f' a =
       let tyf  = Typing.Default.infer sg ctx f in
-      let tyf' = PROD.encode_term tyf in
-      Term.mk_App2 f [a], mk_App (const_of "app") tyf' [f'; encode_term sg ctx a]
+      let tyf' = PROD.quote_term tyf in
+      Term.mk_App2 f [a], mk_App (const_of "app") tyf' [f'; quote_term sg ctx a]
     in
-    snd @@ List.fold_left (fun (f,f') a -> aux f f' a) (f,encode_term sg ctx f) args
+    snd @@ List.fold_left (fun (f,f') a -> aux f f' a) (f,quote_term sg ctx f) args
 
   and encode_Pi sg ctx lc x a b =
     let ctx' = (lc, x, a)::ctx in
-    mk_App (const_of "prod") (mk_Lam dloc x (Some (encode_term sg ctx a)) (encode_term sg ctx' b)) []
+    mk_App (const_of "prod") (mk_Lam dloc x (Some (quote_term sg ctx a)) (quote_term sg ctx' b)) []
 
   let rec encode_pattern = fun sg ctx pattern ->
     let open Rule in
@@ -370,7 +370,7 @@ struct
     in
     match pattern with
     | Var(lc, id, n, ps) -> Var(lc,id,n, List.map (encode_pattern sg ctx) ps)
-    | Brackets(term) -> Brackets(encode_term  sg ctx term)
+    | Brackets(term) -> Brackets(quote_term  sg ctx term)
     | Lambda(lc, id, p) -> Pattern(lc,(name_of "lam"), [dummy;(Lambda(lc,id, encode_pattern sg ctx p))])
     | Pattern(lc,n,[]) ->
       Pattern(lc,name_of "sym", [Pattern(lc,n,[])])
@@ -385,17 +385,17 @@ struct
     let open Rule in
     { r with
       pat = encode_pattern sg r''.ctx r.pat;
-      rhs = encode_term sg r''.ctx r.rhs
+      rhs = quote_term sg r''.ctx r.rhs
     }
 
   let fake_sig () =
     Signature.make (Basic.mk_mident "") Files.find_object_file
 
-  let encode_term ?(sg=fake_sig ()) ?(ctx=[]) t = encode_term sg ctx t
+  let quote_term ?(sg=fake_sig ()) ?(ctx=[]) t = quote_term sg ctx t
 
   let encode_rule ?(sg=fake_sig ()) r = encode_rule sg r
 
-  let rec decode_term t =
+  let rec unquote_term t =
     match t with
     | Kind   -> assert false
     | Type _ -> assert false
@@ -411,51 +411,51 @@ struct
     if name_eq name (name_of "ty") then mk_Type dloc else mk_Const lc name
 
   and decode_Lam lc x mty te =
-    let mty' = match mty with None -> None | Some mty -> Some (decode_term mty) in
-    mk_Lam lc x mty' (decode_term te)
+    let mty' = match mty with None -> None | Some mty -> Some (unquote_term mty) in
+    mk_Lam lc x mty' (unquote_term te)
 
   and decode_App f a args =
     match f with
     | Const(_,name) ->
       if name_eq name (name_of "prod") then
         match a with
-        | Lam(_,x,Some a, b) -> mk_Pi dloc x (decode_term a) (decode_term b)
+        | Lam(_,x,Some a, b) -> mk_Pi dloc x (unquote_term a) (unquote_term b)
         | _ -> assert false
       else if name_eq name (name_of "sym") then
-        decode_term a
+        unquote_term a
       else if name_eq name (name_of "var") then
-        decode_term  a
+        unquote_term  a
       else if name_eq name (name_of "app") then
         begin
           match args with
-          | [f;a] -> Term.mk_App2 (decode_term f) [(decode_term a)]
+          | [f;a] -> Term.mk_App2 (unquote_term f) [(unquote_term a)]
           | _ -> assert false
         end
       else if name_eq name (name_of "lam") then
         match args with
-        | [a] -> decode_term a
+        | [a] -> unquote_term a
         | _ -> assert false
       else
-        mk_App (decode_term f) (decode_term a) (List.map decode_term args)
-    | _ -> mk_App (decode_term f) (decode_term a) (List.map decode_term args)
+        mk_App (unquote_term f) (unquote_term a) (List.map unquote_term args)
+    | _ -> mk_App (unquote_term f) (unquote_term a) (List.map unquote_term args)
 
   and decode_Pi _ _ _ _ = assert false
 end
 
 let encode sg cfg term =
-  match cfg.encoding with
+  match cfg.quoting with
   | None -> term
-  | Some (module E:ENCODING) ->
+  | Some (module E:QUOTING) ->
     if E.safe then
-      E.encode_term ~sg term
+      E.quote_term ~sg term
     else
-      E.encode_term term
+      E.quote_term term
 
 let decode cfg term =
-  match cfg.encoding with
+  match cfg.quoting with
   | None -> term
-  | Some (module E:ENCODING) ->
-   E.decode_term term
+  | Some (module E:QUOTING) ->
+   E.unquote_term term
 
 
 
@@ -469,7 +469,7 @@ let mk_term cfg ?(env=cfg.env) term =
   let sg     = Env.get_signature env in
   let term'  = encode sg cfg term in
   let term'' = normalize cfg term' in
-  if cfg.decoding then
+  if cfg.unquoting then
     decode cfg term''
   else
     term''
@@ -495,16 +495,16 @@ let rec pattern_of_term = fun t ->
 
 let mk_rule env cfg (r: Rule.partially_typed_rule) =
   let open Rule in
-  match cfg.encoding with
+  match cfg.quoting with
   | None ->
     {r with rhs = normalize cfg r.rhs}
-  | Some (module E:ENCODING) ->
+  | Some (module E:QUOTING) ->
     let sg = Env.get_signature env in
     let r' = E.encode_rule ~sg r in
     let pat'  = normalize cfg (Rule.pattern_to_term r'.pat) in
-    let pat'' = if cfg.decoding then pattern_of_term (E.decode_term pat') else pattern_of_term pat' in
+    let pat'' = if cfg.unquoting then pattern_of_term (E.unquote_term pat') else pattern_of_term pat' in
     let rhs'  = normalize cfg r'.rhs in
-    let rhs'' = if cfg.decoding then decode cfg rhs' else rhs' in
+    let rhs'' = if cfg.unquoting then decode cfg rhs' else rhs' in
     {pat=pat'';rhs=rhs'';ctx=r.ctx;name=r.name}
 
 (*
@@ -539,8 +539,8 @@ let mk_entry env = fun cfg entry ->
     let cst = Basic.mk_name md id in
     let rule = { name= Delta(cst) ; ctx = [] ; pat = Pattern(lc, cst, []); rhs = te ; } in
     let safe_ty  =
-      match cfg.encoding, ty with
-      | Some (module E:ENCODING), None when E.safe -> Env.infer cfg.env te
+      match cfg.quoting, ty with
+      | Some (module E:QUOTING), None when E.safe -> Env.infer cfg.env te
       | _                       , Some ty          -> ty
       | _                       , _                -> Term.mk_Type (Basic.dloc)
     in
