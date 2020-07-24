@@ -1,5 +1,12 @@
-(** The [dkmeta] library is an extension of [dedukti] that allows the user to normalize terms according to meta rules. Meta rules are written in the [dedukti] syntax. [dkmeta] also offers a way to reify the syntax of [dedukti] in [dedukti]. This allows you to get around the limitations of the rewrite engine offers par Dedukti: you can rewrite products, static symbols... The overhead introduced by this reification is linear if you choose the [LF] encoding. However, you might create your own encoding for your own goals. *)
-
+(** The [dkmeta] library is an extension of [dedukti] that allows the
+   user to normalize terms according to meta rules. Meta rules are
+   written in the [dedukti] syntax. [dkmeta] also offers a way to
+   reify the syntax of [dedukti] in [dedukti]. This allows you to get
+   around the limitations of the rewrite engine offers par Dedukti:
+   you can rewrite products, static symbols... The overhead introduced
+   by this reification is linear if you choose the [LF]
+   encoding. However, you might create your own encoding for your own
+   goals. *)
 
 open Kernel
 open Parsers
@@ -7,8 +14,7 @@ open Api
 
 val version : string
 
-module type QUOTING =
-sig
+module type QUOTING = sig
   val md : Basic.mident
   (** module name of the encoding *)
 
@@ -16,49 +22,64 @@ sig
   (** List of declarations *)
 
   val safe : bool
-  (** If [safe], the encoding needs type checking. Type checking is done before encoding. *)
+  (** If [safe], the encoding needs type checking. Type checking is
+     done before encoding. *)
 
   val signature : Signature.t
   (** Signature of the encoding. Redudant with [entries] *)
 
-  val quote_term : ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
-  (** [quote_term sg ctx t] quotes a term [t]. [sg] and [ctx] are used only if [safe] is true *)
+  val quote_term :
+    ?sg:Signature.t -> ?ctx:Term.typed_context -> Term.term -> Term.term
+  (** [quote_term sg ctx t] quotes a term [t]. [sg] and [ctx] are used
+     only if [safe] is true *)
 
   val unquote_term : Term.term -> Term.term
   (** [unquote_term t] decodes a term [t] *)
 
-  val encode_rule : ?sg:Signature.t -> 'a Rule.rule -> 'a Rule.rule
-  (** [encode_rule sg r] encodes a rule [r]. [sg] is used only if [safe] is true *)
+  val encode_rule :
+    ?sg:Signature.t -> Rule.partially_typed_rule -> Rule.partially_typed_rule
+  (** [encode_rule sg r] encodes a rule [r]. [sg] is used only if
+       [safe] is true *)
 end
 
 module RNS : Set.S with type elt = Rule.rule_name
 
-(** [cfg] configures [dkmeta]. [meta_rules] contains all the rules used for normalization. If [meta_rules] = None, then all the rules in the signature [sg] are used. It is left to the user to add the [meta_rules] in the signature. If you use an encoding, you have to add manually the signature of the encoding in the meta signature [sg]. Besides, all the meta_rules should be encoded beforethey are added in the signature. At the moment, [dkmeta] offers only one encoding. [dkmeta] nor [dedukti] won't check that the [meta rules] you add can be applied or not. If the normalization succeeded but you did not get the exepected result, probably that the rule was not in the signature. Be careful that the signature you use to normalize terms is not the same than the one you will use to type check your terms. *)
 type cfg = {
-  mutable meta_rules  : RNS.t list option;
-  (** Contains all the meta_rules. *)
-  beta                : bool;
-  (** If off, no beta reduction is allowed *)
-  register_before     : bool;
-  (** entries are registered before they have been normalized *)
-  encode_meta_rules   : bool;
-  (** The quoting function is used on the meta rules first except for products *)
-  quoting            : (module QUOTING) option;
-  (** Set a quoting before normalization *)
-  unquoting            : bool;
-  (** If false, the term is not decoded after normalization *)
-  env                 : Env.t
+  mutable meta_rules : RNS.t list option;  (** Contains all the meta_rules. *)
+  beta : bool;  (** If off, no beta reduction is allowed *)
+  register_before : bool;
+      (** entries are registered before they have been normalized *)
+  encode_meta_rules : bool;
+      (** The quoting function is used on the meta rules first except for products *)
+  quoting : (module QUOTING) option;  (** Set a quoting before normalization *)
+  unquoting : bool;
+      (** If false, the term is not decoded after normalization *)
+  env : Env.t;
 }
+(** [cfg] configures [dkmeta]. [meta_rules] contains all the rules
+   used for normalization. If [meta_rules] = None, then all the rules
+   in the signature [sg] are used. It is left to the user to add the
+   [meta_rules] in the signature. If you use an encoding, you have to
+   add manually the signature of the encoding in the meta signature
+   [sg]. Besides, all the meta_rules should be encoded beforethey are
+   added in the signature. At the moment, [dkmeta] offers only one
+   encoding. [dkmeta] nor [dedukti] won't check that the [meta rules]
+   you add can be applied or not. If the normalization succeeded but
+   you did not get the exepected result, probably that the rule was
+   not in the signature. Be careful that the signature you use to
+   normalize terms is not the same than the one you will use to type
+   check your terms. *)
 
+val default_config : cfg
 (** Initliaze a configuration with the following parameters:
     [meta_rules] = None
     [beta]       = true
     [encoding]   = None
     [env]        = empty_signature (in particular the name is the empty string) *)
-val default_config : cfg
 
-(** Transform a [dkmeta] cfg to a [red_cfg] that can be used by the Rewrite Engine of Dedukti. *)
 val red_cfg : cfg -> Reduction.red_cfg list
+(** Transform a [dkmeta] cfg to a [red_cfg] that can be used by the
+   Rewrite Engine of Dedukti. *)
 
 module LF : QUOTING
 (** Prefixing each subterm with its construtor *)
@@ -67,26 +88,33 @@ module PROD : QUOTING
 (** Quoting products with HOAS *)
 
 module APP : QUOTING
-(** Same as [LF] with type informations for application on product only. *)
+(** Same as [LF] with type informations for application on product
+   only. *)
 
 val debug_flag : Basic.Debug.flag
 
-module MetaConfiguration : Api.Processor.S with type t = Rule.partially_typed_rule list
+module MetaConfiguration :
+  Api.Processor.S with type t = Rule.partially_typed_rule list
 
-val meta_of_rules: ?staged:bool -> Rule.partially_typed_rule list -> cfg -> cfg
-(** [meta_of_rules rs cfg] adds the meta_rules [rs] in the configuration [cfg] *)
+val meta_of_rules : ?staged:bool -> Rule.partially_typed_rule list -> cfg -> cfg
+(** [meta_of_rules rs cfg] adds the meta_rules [rs] in the
+   configuration [cfg] *)
 
 val meta_of_files : ?cfg:cfg -> string list -> cfg
-(** [meta_of_files ?cfg files] returns a configuration from the meta rules declares in the files [files]*)
+(** [meta_of_files ?cfg files] returns a configuration from the meta
+   rules declares in the files [files]*)
 
 val make_meta_processor :
-  cfg -> post_processing:(Env.t -> Entry.entry -> unit) ->
+  cfg ->
+  post_processing:(Env.t -> Entry.entry -> unit) ->
   (module Processor.S with type t = unit)
 
-val mk_term      : cfg -> ?env:Env.t -> Term.term -> Term.term
-(** [mk_term cfg ?env term] normalize a term according to the configuration [cfg] *)
+val mk_term : cfg -> ?env:Env.t -> Term.term -> Term.term
+(** [mk_term cfg ?env term] normalize a term according to the
+   configuration [cfg] *)
 
 val mk_entry : Env.t -> cfg -> Entry.entry -> Entry.entry
-  (** [mk_entry env cfg entry] processes an entry according the meta configuration [cfg] and the current environment [env] *)
+(** [mk_entry env cfg entry] processes an entry according the meta
+   configuration [cfg] and the current environment [env] *)
 
 type _ Processor.t += MetaRules : Rule.partially_typed_rule list Processor.t
