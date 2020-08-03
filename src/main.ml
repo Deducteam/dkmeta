@@ -2,9 +2,6 @@ open Kernel
 open Basic
 open Api
 
-(* By default, we don't wont to fail if a symbol is not found in a signature. This is to simplify the use of dkmeta and to add in the signature only the definable meta symbols. *)
-let _ = Signature.fail_on_symbol_not_found := false
-
 let meta_files : string list ref = ref []
 
 let add_meta_file s =

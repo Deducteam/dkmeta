@@ -51,6 +51,9 @@ let default_config =
     decoding          = true;
   }
 
+let unsafe_finder sg l name =
+  try Kernel.Signature.get_dtree sg l name
+  with _ -> Dtree.empty
 
 (* A dkmeta configuration to a reduction configuration *)
 let red_cfg : cfg -> Reduction.red_cfg list =
@@ -60,6 +63,7 @@ let red_cfg : cfg -> Reduction.red_cfg list =
   { default_cfg with
     beta = cfg.beta;
     target = Snf;
+    finder = unsafe_finder;
     strat = ByValue}
   in
   match cfg.meta_rules with
