@@ -100,6 +100,13 @@ let _ =
     })
   in
   begin
+    match !encoding with
+    | None -> ()
+    | Some (module E) -> (* The signature of the encoding should be added to the current signature *)
+      let sg = Env.get_signature cfg.env in
+      Signature.import_signature sg E.signature
+  end;
+  begin
     let cfg = Dkmeta.meta_of_files ~cfg !meta_files in
     Errors.success "Meta files parsed.";
     let post_processing env entry =
