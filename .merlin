@@ -1,5 +1,0 @@
-S src/
-
-B _build/src/
-
-PKG dedukti dedukti.kernel dedukti.parser dedukti.api
